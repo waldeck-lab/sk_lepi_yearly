@@ -225,6 +225,26 @@ VALUES
 (216289, 'Euxoa ochrogaster', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
 (214233, 'Lyonetia ledi', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025');
 
+
+
+-- =========================================================
+-- App parameter (year) 
+-- =========================================================
+CREATE TABLE IF NOT EXISTS app_config (
+    config_key TEXT PRIMARY KEY,
+    config_value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('report_year', '2025');
+
+DROP VIEW IF EXISTS v_report_year;
+CREATE VIEW v_report_year AS
+SELECT CAST(config_value AS INTEGER) AS report_year
+FROM app_config
+WHERE config_key = 'report_year';
+
+
 -- =========================================================
 -- CORE VIEWS
 -- =========================================================
@@ -254,8 +274,10 @@ GROUP BY
     o.author_text,
     o.red_list_code;
 
-DROP VIEW IF EXISTS v_species_summary_2025;
-CREATE VIEW v_species_summary_2025 AS
+
+DROP VIEW IF EXISTS v_species_summary;
+
+CREATE VIEW v_species_summary AS
 SELECT
     o.taxon_id,
     o.scientific_name,
@@ -268,11 +290,13 @@ SELECT
     MIN(o.observed_at) AS first_obs,
     MAX(o.observed_at) AS last_obs,
     SUM(CASE WHEN o.verified = 1 THEN 1 ELSE 0 END) AS verified_count,
-    GROUP_CONCAT(DISTINCT o.municipality_name) AS municipalities
+    GROUP_CONCAT(DISTINCT o.municipality_name) AS municipalities,
+    substr(o.observed_at, 1, 4) AS obs_year
 FROM observations o
 LEFT JOIN taxa t
     ON t.taxon_id = o.taxon_id
-WHERE substr(o.observed_at, 1, 4) = '2025'
+JOIN v_report_year y
+WHERE substr(o.observed_at, 1, 4) = CAST(y.report_year AS TEXT)
   AND o.scientific_name NOT LIKE '%/%'
   AND COALESCE(t.taxon_rank, '') = 'species'
 GROUP BY
@@ -280,10 +304,13 @@ GROUP BY
     o.scientific_name,
     o.common_name,
     o.author_text,
-    o.red_list_code;
+    o.red_list_code,
+    substr(o.observed_at, 1, 4);
+    
 
-DROP VIEW IF EXISTS v_uncertain_species_2025;
-CREATE VIEW v_uncertain_species_2025 AS
+DROP VIEW IF EXISTS v_uncertain_species;
+
+CREATE VIEW v_uncertain_species AS
 SELECT
     o.taxon_id,
     o.scientific_name,
@@ -301,11 +328,13 @@ SELECT
         WHEN o.scientific_name LIKE '%/%' THEN 'slash-aggregate'
         WHEN COALESCE(t.taxon_rank, '') <> 'species' THEN 'non-species-rank'
         ELSE 'other'
-    END AS uncertain_reason
+    END AS uncertain_reason,
+    substr(o.observed_at, 1, 4) AS obs_year
 FROM observations o
 LEFT JOIN taxa t
     ON t.taxon_id = o.taxon_id
-WHERE substr(o.observed_at, 1, 4) = '2025'
+JOIN v_report_year y
+WHERE substr(o.observed_at, 1, 4) = CAST(y.report_year AS TEXT)
   AND (
         o.scientific_name LIKE '%/%'
         OR COALESCE(t.taxon_rank, '') <> 'species'
@@ -315,10 +344,11 @@ GROUP BY
     o.scientific_name,
     o.common_name,
     o.author_text,
-    o.red_list_code;
+    o.red_list_code,
+    substr(o.observed_at, 1, 4);
 
-DROP VIEW IF EXISTS v_family_species_summary_2025;
-CREATE VIEW v_family_species_summary_2025 AS
+DROP VIEW IF EXISTS v_family_species_summary;
+CREATE VIEW v_family_species_summary AS
 SELECT
     COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
     s.taxon_id,
@@ -333,7 +363,7 @@ SELECT
     s.first_obs,
     s.last_obs,
     s.municipalities
-FROM v_species_summary_2025 s
+FROM v_species_summary s
 LEFT JOIN taxa t
     ON t.taxon_id = s.taxon_id
 LEFT JOIN family_overrides fo
@@ -346,8 +376,29 @@ ORDER BY
 -- REASON FLAGS
 -- =========================================================
 
-DROP VIEW IF EXISTS v_first_in_skane_2025;
-CREATE VIEW v_first_in_skane_2025 AS
+DROP VIEW IF EXISTS v_all_species_reason_flags;
+CREATE VIEW v_all_species_reason_flags AS
+SELECT
+    taxon_id,
+    scientific_name,
+    reason_code,
+    reason_text,
+    priority
+FROM v_species_reason_flags
+
+UNION ALL
+
+SELECT
+    m.taxon_id,
+    m.scientific_name,
+    m.reason_code,
+    m.reason_text,
+    m.priority
+FROM species_manual_flags m;
+
+
+DROP VIEW IF EXISTS v_first_in_skane;
+CREATE VIEW v_first_in_skane AS
 SELECT
     s.taxon_id,
     s.scientific_name,
@@ -361,16 +412,18 @@ SELECT
     s.first_obs,
     s.last_obs,
     s.municipalities,
-    'first_in_skane_2025' AS reason_code,
-    'Första kända fyndet i Skåne infaller under 2025' AS reason_text,
+    'first_in_skane' AS reason_code,
+    'Första kända fyndet i Skåne infaller under valt rapportår' AS reason_text,
     10 AS priority
-FROM v_species_summary_2025 s
+FROM v_species_summary s
 JOIN species_skane_history h
     ON h.taxon_id = s.taxon_id
-WHERE h.first_known_year_in_skane = 2025;
+JOIN v_report_year y
+WHERE h.first_known_year_in_skane = y.report_year;
 
-DROP VIEW IF EXISTS v_species_reason_flags_2025;
-CREATE VIEW v_species_reason_flags_2025 AS
+DROP VIEW IF EXISTS v_species_reason_flags;
+
+CREATE VIEW v_species_reason_flags AS
 SELECT
     s.taxon_id,
     s.scientific_name,
@@ -383,7 +436,7 @@ SELECT
         WHEN 'NT' THEN 4
         ELSE 100
     END AS priority
-FROM v_species_summary_2025 s
+FROM v_species_summary s
 WHERE s.red_list_code IN ('CR','EN','VU','NT')
 
 UNION ALL
@@ -394,7 +447,7 @@ SELECT
     'few_observations' AS reason_code,
     'Få observationer under året' AS reason_text,
     40 AS priority
-FROM v_species_summary_2025 s
+FROM v_species_summary s
 WHERE s.observation_count <= 3
 
 UNION ALL
@@ -405,7 +458,7 @@ SELECT
     'verified' AS reason_code,
     'Minst en verifierad observation' AS reason_text,
     60 AS priority
-FROM v_species_summary_2025 s
+FROM v_species_summary s
 WHERE s.verified_count >= 1
 
 UNION ALL
@@ -416,30 +469,10 @@ SELECT
     f.reason_code,
     f.reason_text,
     f.priority
-FROM v_first_in_skane_2025 f;
+FROM v_first_in_skane f;
 
-DROP VIEW IF EXISTS v_all_species_reason_flags_2025;
-CREATE VIEW v_all_species_reason_flags_2025 AS
-SELECT
-    taxon_id,
-    scientific_name,
-    reason_code,
-    reason_text,
-    priority
-FROM v_species_reason_flags_2025
-
-UNION ALL
-
-SELECT
-    m.taxon_id,
-    m.scientific_name,
-    m.reason_code,
-    m.reason_text,
-    m.priority
-FROM species_manual_flags m;
-
-DROP VIEW IF EXISTS v_interesting_species_2025;
-CREATE VIEW v_interesting_species_2025 AS
+DROP VIEW IF EXISTS v_interesting_species;
+CREATE VIEW v_interesting_species AS
 SELECT
     s.taxon_id,
     s.scientific_name,
@@ -456,8 +489,8 @@ SELECT
     GROUP_CONCAT(DISTINCT r.reason_code) AS reason_codes,
     GROUP_CONCAT(DISTINCT r.reason_text) AS reason_texts,
     MIN(r.priority) AS top_priority
-FROM v_species_summary_2025 s
-JOIN v_all_species_reason_flags_2025 r
+FROM v_species_summary s
+JOIN v_all_species_reason_flags r
     ON r.taxon_id = s.taxon_id
 GROUP BY
     s.taxon_id,
@@ -476,8 +509,8 @@ ORDER BY
     top_priority,
     s.scientific_name;
 
-DROP VIEW IF EXISTS v_interesting_family_species_2025;
-CREATE VIEW v_interesting_family_species_2025 AS
+DROP VIEW IF EXISTS v_interesting_family_species;
+CREATE VIEW v_interesting_family_species AS
 SELECT
     COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
     i.taxon_id,
@@ -495,7 +528,7 @@ SELECT
     i.reason_codes,
     i.reason_texts,
     i.top_priority
-FROM v_interesting_species_2025 i
+FROM v_interesting_species i
 LEFT JOIN taxa t
     ON t.taxon_id = i.taxon_id
 LEFT JOIN family_overrides fo
@@ -552,103 +585,154 @@ LEFT JOIN author_abbrev a
 -- =========================================================
 -- EDITORIAL OBSERVATION TEXT
 -- =========================================================
+DROP VIEW IF EXISTS v_observation_editorial;
+CREATE VIEW v_observation_editorial AS
+WITH base AS (
+    SELECT
+        o.obs_id,
+        o.taxon_id,
+        COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
+        COALESCE(fsv.family_name_sv, '') AS family_name_sv,
+        o.scientific_name,
+        ad.author_display AS author_short,
+        o.common_name,
+        o.red_list_code,
+        o.reporter,
 
-DROP VIEW IF EXISTS v_observation_editorial_2025;
-CREATE VIEW v_observation_editorial_2025 AS
+        o.locality,
+        CASE
+            WHEN o.locality IS NULL THEN NULL
+            WHEN TRIM(o.locality) LIKE '%, Sk' THEN TRIM(substr(TRIM(o.locality), 1, length(TRIM(o.locality)) - 4))
+            ELSE TRIM(o.locality)
+        END AS locality_clean,
+
+        o.socken,
+        CASE
+            WHEN o.socken IS NULL THEN NULL
+            WHEN TRIM(o.socken) LIKE 'Sk,%' THEN TRIM(substr(TRIM(o.socken), 4))
+            ELSE TRIM(o.socken)
+        END AS socken_clean,
+
+        o.source_comment,
+        o.individual_count,
+        o.observed_at,
+        o.verified
+    FROM observations o
+    LEFT JOIN taxa t
+        ON t.taxon_id = o.taxon_id
+    LEFT JOIN family_overrides fo
+        ON fo.scientific_name = o.scientific_name
+    LEFT JOIN family_names_sv fsv
+        ON fsv.family_name = COALESCE(t.family_name, fo.family_name)
+    LEFT JOIN v_author_display ad
+        ON ad.taxon_id = o.taxon_id
+    JOIN v_report_year y
+    WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
+      AND o.scientific_name NOT LIKE '%/%'
+      AND COALESCE(t.taxon_rank, '') = 'species'
+)
 SELECT
-    o.obs_id,
-    o.taxon_id,
-    COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
-    COALESCE(fsv.family_name_sv, '') AS family_name_sv,
-    o.scientific_name,
-    ad.author_display AS author_short,
-    o.common_name,
-    o.red_list_code,
-    o.reporter,
-    o.locality,
-    o.socken,
-    o.source_comment,
-    o.individual_count,
-    o.observed_at,
-    o.verified,
+    obs_id,
+    taxon_id,
+    family_name,
+    family_name_sv,
+    scientific_name,
+    author_short,
+    common_name,
+    red_list_code,
+    reporter,
+    locality,
+    locality_clean,
+    socken,
+    socken_clean,
+    source_comment,
+    individual_count,
+    observed_at,
+    verified,
 
     CASE
-        WHEN o.individual_count IS NULL OR TRIM(o.individual_count) = '' THEN 'noterad'
-        ELSE o.individual_count || ' ex'
+        WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
+        ELSE TRIM(individual_count) || ' ex'
     END AS count_text,
 
-    CAST(strftime('%d', substr(o.observed_at,1,19)) AS INTEGER) || '/' ||
-    CAST(strftime('%m', substr(o.observed_at,1,19)) AS INTEGER) AS short_date,
+    CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
+    CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER) AS short_date,
 
     CASE
-        WHEN o.reporter IS NULL OR TRIM(o.reporter) = '' THEN '[okänd rapportör]'
-        WHEN instr(o.reporter, ',') > 0 THEN substr(o.reporter, 1, instr(o.reporter, ',') - 1)
-        ELSE o.reporter
+        WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
+        WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
+        ELSE TRIM(reporter)
     END AS short_reporter,
 
     TRIM(
-        CASE
-            WHEN o.individual_count IS NULL OR TRIM(o.individual_count) = '' THEN 'noterad'
-            ELSE o.individual_count || ' ex'
-        END
-        || ', ' ||
-        (CAST(strftime('%d', substr(o.observed_at,1,19)) AS INTEGER) || '/' ||
-         CAST(strftime('%m', substr(o.observed_at,1,19)) AS INTEGER))
-        || ', ' ||
-        CASE
-            WHEN o.reporter IS NULL OR TRIM(o.reporter) = '' THEN '[okänd rapportör]'
-            WHEN instr(o.reporter, ',') > 0 THEN substr(o.reporter, 1, instr(o.reporter, ',') - 1)
-            ELSE o.reporter
-        END
-        || CASE WHEN o.locality IS NOT NULL AND TRIM(o.locality) <> '' THEN ', ' || o.locality ELSE '' END
-        || CASE WHEN o.socken IS NOT NULL AND TRIM(o.socken) <> '' THEN ', ' || o.socken ELSE '' END
-        || CASE
-            WHEN o.source_comment IS NOT NULL
-             AND TRIM(o.source_comment) <> ''
-             AND length(o.source_comment) <= 120
-            THEN ', ' || o.source_comment
-            ELSE ''
-           END
+        REPLACE(
+            REPLACE(
+                REPLACE(
+                    (
+                        CASE
+                            WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
+                            ELSE TRIM(individual_count) || ' ex'
+                        END
+                        || ', ' ||
+                        (CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
+                         CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER))
+                        || ', ' ||
+                        CASE
+                            WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
+                            WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
+                            ELSE TRIM(reporter)
+                        END
+                        || CASE
+                            WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
+                            THEN ', ' || TRIM(locality_clean)
+                            ELSE ''
+                           END
+                        || CASE
+                            WHEN socken_clean IS NOT NULL
+                             AND TRIM(socken_clean) <> ''
+                             AND LOWER(TRIM(socken_clean)) <> LOWER(TRIM(locality_clean))
+                            THEN ', ' || TRIM(socken_clean)
+                            ELSE ''
+                           END
+                        || CASE
+                            WHEN source_comment IS NOT NULL
+                             AND TRIM(source_comment) <> ''
+                             AND length(TRIM(source_comment)) <= 120
+                            THEN ', ' || TRIM(source_comment)
+                            ELSE ''
+                           END
+                    ),
+                    ', ,', ', '
+                ),
+                ',  ', ', '
+            ),
+            '  ', ' '
+        )
     ) AS obs_text
-FROM observations o
-LEFT JOIN taxa t
-    ON t.taxon_id = o.taxon_id
-LEFT JOIN family_overrides fo
-    ON fo.scientific_name = o.scientific_name
-LEFT JOIN family_names_sv fsv
-    ON fsv.family_name = COALESCE(t.family_name, fo.family_name)
-LEFT JOIN v_author_display ad
-    ON ad.taxon_id = o.taxon_id
-WHERE substr(o.observed_at,1,4) = '2025'
-  AND o.scientific_name NOT LIKE '%/%'
-  AND COALESCE(t.taxon_rank, '') = 'species';
+FROM base;
 
-DROP VIEW IF EXISTS v_observation_editorial_dedup_2025;
-CREATE VIEW v_observation_editorial_dedup_2025 AS
+DROP VIEW IF EXISTS v_observation_editorial_dedup;
+CREATE VIEW v_observation_editorial_dedup AS
 WITH base AS (
     SELECT
         e.*,
         ROW_NUMBER() OVER (
             PARTITION BY
                 e.taxon_id,
-                e.short_date,
-                COALESCE(e.short_reporter, ''),
-                COALESCE(e.locality, ''),
-                COALESCE(e.socken, ''),
-                COALESCE(e.count_text, '')
+                e.obs_text
             ORDER BY
                 CASE WHEN e.source_comment IS NOT NULL AND TRIM(e.source_comment) <> '' THEN 1 ELSE 0 END DESC,
                 CASE WHEN e.verified = 1 THEN 1 ELSE 0 END DESC,
                 e.obs_id
         ) AS dup_rn
-    FROM v_observation_editorial_2025 e
+    FROM v_observation_editorial e
 )
 SELECT *
 FROM base
 WHERE dup_rn = 1;
 
-DROP VIEW IF EXISTS v_ranked_observations_2025;
-CREATE VIEW v_ranked_observations_2025 AS
+DROP VIEW IF EXISTS v_ranked_observations;
+CREATE VIEW v_ranked_observations AS
 SELECT
     e.*,
     (
@@ -665,14 +749,14 @@ SELECT
             e.observed_at ASC,
             e.obs_id
     ) AS rn
-FROM v_observation_editorial_dedup_2025 e;
+FROM v_observation_editorial_dedup e;
 
 -- =========================================================
 -- REPORT VIEWS
 -- =========================================================
 
-DROP VIEW IF EXISTS v_report_draft_2025;
-CREATE VIEW v_report_draft_2025 AS
+DROP VIEW IF EXISTS v_report_draft;
+CREATE VIEW v_report_draft AS
 SELECT
     i.family_name,
     COALESCE(fsv.family_name_sv, '') AS family_name_sv,
@@ -685,7 +769,7 @@ SELECT
     i.reason_texts,
     i.top_priority,
     CASE
-        WHEN i.observation_count <= 5 THEN GROUP_CONCAT(r.obs_text, ' ; ')
+        WHEN i.observation_count <= 5 THEN GROUP_CONCAT(r.obs_text, '. ')
         ELSE NULL
     END AS obs_data,
     CASE
@@ -696,8 +780,8 @@ SELECT
         ELSE
             COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
     END AS closing_comment
-FROM v_interesting_family_species_2025 i
-LEFT JOIN v_ranked_observations_2025 r
+FROM v_interesting_family_species i
+LEFT JOIN v_ranked_observations r
     ON r.taxon_id = i.taxon_id
    AND r.rn <= 5
 LEFT JOIN family_names_sv fsv
@@ -721,8 +805,8 @@ ORDER BY
     i.family_name,
     i.scientific_name;
 
-DROP VIEW IF EXISTS v_report_lines_2025;
-CREATE VIEW v_report_lines_2025 AS
+DROP VIEW IF EXISTS v_report_lines;
+CREATE VIEW v_report_lines AS
 SELECT
     family_name,
     family_name_sv,
@@ -750,11 +834,11 @@ SELECT
             ELSE ''
            END
     ) AS report_line
-FROM v_report_draft_2025
+FROM v_report_draft
 ORDER BY family_name, scientific_name;
 
-DROP VIEW IF EXISTS v_family_headers_2025;
-CREATE VIEW v_family_headers_2025 AS
+DROP VIEW IF EXISTS v_family_headers;
+CREATE VIEW v_family_headers AS
 SELECT DISTINCT
     family_name,
     family_name_sv,
@@ -763,5 +847,7 @@ SELECT DISTINCT
         THEN family_name || ' - ' || family_name_sv
         ELSE family_name
     END AS family_header
-FROM v_report_lines_2025
+FROM v_report_lines
 ORDER BY family_name;
+
+

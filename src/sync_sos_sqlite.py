@@ -1,15 +1,24 @@
+# file: ../src/sync_sos_sqlite.py
 import json
 import os
 import sqlite3
 import time
+from calendar import monthrange
 from typing import Any
 
 import requests
 
 DB_PATH = "obsperyear.sqlite"
 BASE_URL = "https://api.artdatabanken.se/species-observation-system/v1"
+
+
+YEAR = int(os.getenv("SOS_YEAR", "2025"))
+PROVINCE_FEATURE_ID = os.getenv("SOS_PROVINCE_FEATURE_ID", "1") # 1 - Skåne
+DATA_PROVIDER_ID = int(os.getenv("SOS_DATA_PROVIDER_ID", "1")) # 1 - Artportalen
 TAKE = 1000
-SYNC_NAME = "skane_lepidoptera_2025_base"
+TAXON_ROOT = 3000188  # Lepidoptera
+SYNC_NAME = f"lepidoptera_province_{PROVINCE_FEATURE_ID}_{YEAR}"
+
 
 API_KEY = os.getenv("SOS_API_KEY", "")
 AUTH_TOKEN = os.getenv("SOS_AUTH_TOKEN", "")
@@ -28,21 +37,6 @@ HEADERS = {
     "Ocp-Apim-Subscription-Key": API_KEY,
     "Authorization": f"Bearer {AUTH_TOKEN}",
 }
-
-MONTH_PERIODS = [
-    ("2025-01-01", "2025-01-31"),
-    ("2025-02-01", "2025-02-28"),
-    ("2025-03-01", "2025-03-31"),
-    ("2025-04-01", "2025-04-30"),
-    ("2025-05-01", "2025-05-31"),
-    ("2025-06-01", "2025-06-30"),
-    ("2025-07-01", "2025-07-31"),
-    ("2025-08-01", "2025-08-31"),
-    ("2025-09-01", "2025-09-30"),
-    ("2025-10-01", "2025-10-31"),
-    ("2025-11-01", "2025-11-30"),
-    ("2025-12-01", "2025-12-31"),
-]
 
 
 INSERT_SQL = """
@@ -114,6 +108,14 @@ ON CONFLICT(obs_id) DO UPDATE SET
     raw_json = excluded.raw_json,
     updated_at = CURRENT_TIMESTAMP
 """
+def month_periods(year: int):
+    periods = []
+    for month in range(1, 13):
+        last_day = monthrange(year, month)[1]
+        start_date = f"{year:04d}-{month:02d}-01"
+        end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
+        periods.append((start_date, end_date))
+    return periods
 
 def get_nested(d: dict[str, Any], path: list[str], default=None):
     cur = d
@@ -238,36 +240,45 @@ def save_progress(cur: sqlite3.Cursor, skip: int, total_count: int, notes: str):
 def build_payload(start_date: str, end_date: str) -> dict:
     return {
         "taxon": {
-            "ids": [3000188],
+            "ids": [TAXON_ROOT],
             "includeUnderlyingTaxa": True
         },
+
         "geographics": {
             "areas": [
                 {
-                    "areaType": "County",
-                    "featureId": "12"
+                    "areaType": "Province",
+                    "featureId": PROVINCE_FEATURE_ID
                 }
             ]
         },
+
         "date": {
             "startDate": start_date,
             "endDate": end_date,
             "dateFilterType": "BetweenStartDateAndEndDate"
         },
+
         "dataProvider": {
-            "ids": [1]
+            "ids": [DATA_PROVIDER_ID]
         },
+
         "occurrenceStatus": "present",
+
         "determinationFilter": "NotUnsureDetermination",
+
         "notRecoveredFilter": "DontIncludeNotRecovered",
+
         "output": {
             "fieldSet": "Minimum",
             "fields": [
                 "datasetName",
                 "event.startDate",
                 "event.endDate",
+
                 "identification.verified",
                 "identification.uncertainIdentification",
+
                 "location.locality",
                 "location.county",
                 "location.province",
@@ -276,24 +287,22 @@ def build_payload(start_date: str, end_date: str) -> dict:
                 "location.decimalLatitude",
                 "location.decimalLongitude",
                 "location.coordinateUncertaintyInMeters",
+
                 "occurrence.occurrenceId",
                 "occurrence.recordedBy",
                 "occurrence.reportedBy",
                 "occurrence.individualCount",
                 "occurrence.occurrenceRemarks",
+
                 "taxon.id",
                 "taxon.sortOrder",
                 "taxon.scientificName",
                 "taxon.vernacularName",
                 "taxon.author",
-                "taxon.attributes.redlistCategory",
-                "taxon.attributes.isRedlisted",
-                "taxon.family",
-                "taxon.order"
+                "taxon.attributes.redlistCategory"
             ]
         }
     }
-
 
 def get_resume_state(cur: sqlite3.Cursor):
     cur.execute(
@@ -334,6 +343,7 @@ def save_progress(cur: sqlite3.Cursor, month_index: int, skip: int, total_count:
 
 
 def main():
+    print(f"Starting sync for YEAR={YEAR}, PROVINCE_FEATURE_ID={PROVINCE_FEATURE_ID}, DATA_PROVIDER_ID={DATA_PROVIDER_ID}")
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
@@ -342,7 +352,7 @@ def main():
     inserted_or_updated = 0
 
     print(f"Starting sync from month_index={month_index}, skip={resume_skip}")
-
+    MONTH_PERIODS = month_periods(YEAR)
     for mi in range(month_index, len(MONTH_PERIODS)):
         start_date, end_date = MONTH_PERIODS[mi]
         payload = build_payload(start_date, end_date)
