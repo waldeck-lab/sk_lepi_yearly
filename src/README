@@ -5,6 +5,20 @@ python3 import_dyntaxa_dwca.py
 python3 init_sqlite_db.py
 
 
+## Add 'new species'
+# Open db:
+sqlite3 obsperyear.sqlite  
+# Drop in the INSERT part of "new_spec_sk_2025.txt" 
+
+
+## Export to CSV file ready for editorial work
+sqlite3 -header -csv obsperyear.sqlite "
+SELECT family_name, family_name_sv, report_line
+FROM v_report_lines_2025
+ORDER BY family_name, scientific_name;
+" > report_lines_2025.csv
+
+
 # Test of DB
 SELECT COUNT(*) FROM observations WHERE source_comment IS NOT NULL;
 SELECT COUNT(*) FROM observations WHERE red_list_code IS NOT NULL;
@@ -14,9 +28,19 @@ WHERE source_comment IS NOT NULL OR red_list_code IS NOT NULL
 LIMIT 20;
 
 
-
+# Another test
 SELECT COUNT(*) FROM observations;
 SELECT COUNT(*) FROM taxa;
 SELECT COUNT(*) FROM v_species_summary_2025;
 SELECT COUNT(*) FROM v_uncertain_species_2025;
 SELECT family_name, COUNT(*) FROM v_family_species_summary_2025 GROUP BY family_name ORDER BY COUNT(*) DESC LIMIT 20;
+
+
+# Yet another test (report of Zygaena)
+SELECT report_line
+FROM v_report_lines_2025
+WHERE family_name = 'Zygaenidae';
+
+
+
+
