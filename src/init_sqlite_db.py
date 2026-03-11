@@ -609,7 +609,6 @@ WHERE substr(o.observed_at,1,4) = '2025'
   AND COALESCE(t.taxon_rank, '') = 'species';
 
 DROP VIEW IF EXISTS v_report_draft_2025;
-
 CREATE VIEW v_report_draft_2025 AS
 SELECT
     i.family_name,
@@ -689,7 +688,6 @@ SELECT
 FROM v_report_draft_2025
 ORDER BY family_name, scientific_name;
 
-
 DROP VIEW IF EXISTS v_ranked_observations_2025;
 CREATE VIEW v_ranked_observations_2025 AS
 SELECT
@@ -743,7 +741,15 @@ INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
 ('Denis & Schiffenmüller', 'D&S'),
 ('Denis & Schiffenmuller', 'D&S'),
 ('Scheven', 'Sch.'),
-('Wallengren', 'Wall.');
+('Wallengren', 'Wall.'),
+('Scheven', 'Sch.'),
+('Ochsenheimer', 'Ochs.'),
+('Duponchel', 'Dup.'),
+('Clerck', 'Cl.'),
+('Scopoli', 'Scop.'),
+('Freyer', 'Fr.'),
+('Müller', 'Müll.'),
+('Röber', 'Röb.');
 
 DROP VIEW IF EXISTS v_author_display;
 CREATE VIEW v_author_display AS
@@ -752,7 +758,6 @@ WITH author_base AS (
         t.taxon_id,
         t.scientific_name,
         t.author_text AS author_raw,
-
         TRIM(
             REPLACE(
                 REPLACE(COALESCE(t.author_text, ''), '(', ''),
@@ -786,6 +791,49 @@ FROM author_clean c
 LEFT JOIN author_abbrev a
     ON a.author_full = c.author_normalized;
 
+DROP VIEW IF EXISTS v_observation_editorial_dedup_2025;
+CREATE VIEW v_observation_editorial_dedup_2025 AS
+WITH base AS (
+    SELECT
+        e.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY
+                e.taxon_id,
+                e.short_date,
+                COALESCE(e.short_reporter, ''),
+                COALESCE(e.locality, ''),
+                COALESCE(e.socken, ''),
+                COALESCE(e.count_text, '')
+            ORDER BY
+                CASE WHEN e.source_comment IS NOT NULL AND TRIM(e.source_comment) <> '' THEN 1 ELSE 0 END DESC,
+                CASE WHEN e.verified = 1 THEN 1 ELSE 0 END DESC,
+                e.obs_id
+        ) AS dup_rn
+    FROM v_observation_editorial_2025 e
+)
+SELECT *
+FROM base
+WHERE dup_rn = 1;
+
+DROP VIEW IF EXISTS v_ranked_observations_2025;
+CREATE VIEW v_ranked_observations_2025 AS
+SELECT
+    e.*,
+    (
+        CASE WHEN e.source_comment IS NOT NULL AND TRIM(e.source_comment) <> '' THEN 100 ELSE 0 END +
+        CASE WHEN e.verified = 1 THEN 40 ELSE 0 END +
+        CASE WHEN e.individual_count IS NOT NULL AND TRIM(e.individual_count) <> '' THEN 20 ELSE 0 END
+    ) AS quality_score,
+    ROW_NUMBER() OVER (
+        PARTITION BY e.taxon_id
+        ORDER BY
+            CASE WHEN e.source_comment IS NOT NULL AND TRIM(e.source_comment) <> '' THEN 1 ELSE 0 END DESC,
+            CASE WHEN e.verified = 1 THEN 1 ELSE 0 END DESC,
+            CASE WHEN e.individual_count IS NOT NULL AND TRIM(e.individual_count) <> '' THEN 1 ELSE 0 END DESC,
+            e.observed_at ASC,
+            e.obs_id
+    ) AS rn
+FROM v_observation_editorial_dedup_2025 e;
 
 """
 
