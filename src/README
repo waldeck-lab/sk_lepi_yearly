@@ -1,0 +1,22 @@
+# Clean run 
+python3 init_sqlite_db.py
+python3 sync_sos_sqlite.py
+python3 import_dyntaxa_dwca.py
+python3 init_sqlite_db.py
+
+
+# Test of DB
+SELECT COUNT(*) FROM observations WHERE source_comment IS NOT NULL;
+SELECT COUNT(*) FROM observations WHERE red_list_code IS NOT NULL;
+SELECT scientific_name, common_name, red_list_code, source_comment
+FROM observations
+WHERE source_comment IS NOT NULL OR red_list_code IS NOT NULL
+LIMIT 20;
+
+
+
+SELECT COUNT(*) FROM observations;
+SELECT COUNT(*) FROM taxa;
+SELECT COUNT(*) FROM v_species_summary_2025;
+SELECT COUNT(*) FROM v_uncertain_species_2025;
+SELECT family_name, COUNT(*) FROM v_family_species_summary_2025 GROUP BY family_name ORDER BY COUNT(*) DESC LIMIT 20;

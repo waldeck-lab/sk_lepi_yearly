@@ -1,35 +1,34 @@
-CREATE DATABASE IF NOT EXISTS ObsPerYear;
-USE ObsPerYear;
-
-CREATE TABLE observations (
-    obs_id BIGINT PRIMARY KEY,
-    taxon_id INT NOT NULL,
-    taxon_sort_order INT,
-    red_list_code VARCHAR(10),
-
-    common_name VARCHAR(255),
-    scientific_name VARCHAR(255),
-    author_text VARCHAR(255),
-
-    individual_count VARCHAR(50),
-    life_stage VARCHAR(100),
-    sex VARCHAR(50),
-    method VARCHAR(255),
-
-    locality VARCHAR(255),
-    socken VARCHAR(255),
-    reporter VARCHAR(255),
-
-    observed_at DATETIME,
+CREATE TABLE IF NOT EXISTS observations (
+    obs_id TEXT PRIMARY KEY,
+    taxon_id INTEGER,
+    taxon_sort_order INTEGER,
+    red_list_code TEXT,
+    common_name TEXT,
+    scientific_name TEXT,
+    author_text TEXT,
+    individual_count TEXT,
+    life_stage TEXT,
+    sex TEXT,
+    method TEXT,
+    locality TEXT,
+    socken TEXT,
+    reporter TEXT,
+    observed_at TEXT,
     source_comment TEXT,
-
-    source_modified_at DATETIME,
-
-    imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    INDEX idx_taxon (taxon_id),
-    INDEX idx_date (observed_at),
-    INDEX idx_modified (source_modified_at),
-    INDEX idx_redlist (red_list_code)
+    source_dataset TEXT,
+    county_id TEXT,
+    county_name TEXT,
+    municipality_id TEXT,
+    municipality_name TEXT,
+    decimal_latitude REAL,
+    decimal_longitude REAL,
+    verified INTEGER,
+    uncertain_identification INTEGER,
+    imported_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_obs_taxon ON observations(taxon_id);
+CREATE INDEX IF NOT EXISTS idx_obs_date ON observations(observed_at);
+CREATE INDEX IF NOT EXISTS idx_obs_county ON observations(county_id);
+CREATE INDEX IF NOT EXISTS idx_obs_sciname ON observations(scientific_name);
