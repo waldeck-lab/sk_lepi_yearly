@@ -1,3 +1,4 @@
+# File ./src/init_sqlite_db.py
 import sqlite3
 
 DB_PATH = "obsperyear.sqlite"

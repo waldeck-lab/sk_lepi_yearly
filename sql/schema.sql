@@ -1,3 +1,4 @@
+-- file: ./sql/schema.sql 
 CREATE TABLE IF NOT EXISTS observations (
     obs_id TEXT PRIMARY KEY,
     taxon_id INTEGER,
