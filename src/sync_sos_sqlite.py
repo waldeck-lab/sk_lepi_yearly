@@ -25,6 +25,9 @@ API_KEY = os.getenv("SOS_API_KEY", "")
 if not API_KEY:
     raise RuntimeError("Missing SOS_API_KEY environment variable")
 
+# global counter(s)
+missing_sort_order_cnt = 0 
+
 
 HEADERS = {
     "X-Api-Version": "1.5",
@@ -193,11 +196,14 @@ def extract_row(rec: dict[str, Any]):
     # 2. Get either activty or behaviour if present
     method = (get_nested(rec, ["occurrence", "activity", "value"])
               or get_nested(rec, ["occurrence", "behavior", "value"]))
-    
+    # 3. Verify sort-order exists
+    taxon_sort_order = get_nested(rec, ["taxon", "attributes", "sortOrder"])
+    if taxon_sort_order is None:
+        missing_sort_order_cnt += 1
     return (
         str(obs_id),
         get_nested(rec, ["taxon", "id"]),
-        get_nested(rec, ["taxon", "attributes", "sortOrder"]),
+        taxon_sort_order,
         taxon_attrs.get("redlistCategory"),
         get_nested(rec, ["taxon", "vernacularName"]),
         get_nested(rec, ["taxon", "scientificName"]),
@@ -342,12 +348,18 @@ def save_progress(cur: sqlite3.Cursor, month_index: int, skip: int, total_count:
         (SYNC_NAME, skip, total_count, notes)
     )
 
-
+    
 def main():
     print(f"Starting sync for YEAR={YEAR}, PROVINCE_FEATURE_ID={PROVINCE_FEATURE_ID}, DATA_PROVIDER_ID={DATA_PROVIDER_ID}")
     conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        print("SQLite WAL enabled")
+    except sqlite3.OperationalError as e:
+        print(f"Could not enable WAL: {e}. Continuing without WAL.")
+
     cur = conn.cursor()
 
     month_index, resume_skip = get_resume_state(cur)
@@ -400,6 +412,8 @@ def main():
         conn.commit()
 
     conn.close()
+    if (missing_sort_order_cnt > 0): 
+        print(f"(!) Observations without taxon sort order={missing_sort_order_cnt}")
     print(f"Done. seen={seen}, inserted_or_updated={inserted_or_updated}")
 
 if __name__ == "__main__":

@@ -185,7 +185,22 @@ INSERT OR IGNORE INTO family_names_sv (family_name, family_name_sv) VALUES
 ('Sphingidae', 'Svärmare'),
 ('Pieridae', 'Vitfjärilar'),
 ('Lycaenidae', 'Blåvingar'),
-('Yponomeutidae', 'Spinnmalar');
+('Yponomeutidae', 'Spinnmalar'),
+('Adelidae', 'Antennmalar'),
+('Heliozelidae', 'Hålmalar'),
+('Incurvariidae', 'Bladskärare'),
+('Prodoxidae', 'Knoppmalar'),
+('Choreutidae', 'Gnidmott'),
+('Douglasiidae', 'Skäckmalar'),
+('Epermeniidae', 'Skärmmalar'),
+('Momphidae', 'Dunörtsmalar'),
+('Parametriotidae', 'Brokmalar'),
+('Scythrididae', 'Fältmalar'),
+('Lypusidae', 'Tubmalar'),
+('Argyresthiidae', 'Hängemalar'),
+('Glyphipterigidae', 'Hakmalar'),
+('Lyonetiidae', 'Lansettmalar'),
+('Plutellidae', 'Korsblommalar');
 
 INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
 ('Linnaeus', 'L.'),
@@ -807,6 +822,33 @@ SELECT
     ) AS rn
 FROM v_observation_editorial_dedup e;
 
+DROP VIEW IF EXISTS v_report_observations;
+CREATE VIEW v_report_observations AS
+SELECT
+    taxon_id,
+    obs_text,
+    observed_at
+FROM v_ranked_observations
+WHERE rn <= 5
+ORDER BY
+    taxon_id,
+    observed_at;
+
+
+DROP VIEW IF EXISTS v_obs_concat;
+CREATE VIEW v_obs_concat AS
+SELECT
+    taxon_id,
+    GROUP_CONCAT(TRIM(obs_text), '; ') AS obs_texts
+FROM (
+    SELECT *
+    FROM v_ranked_observations
+    WHERE rn <= 3
+    ORDER BY taxon_id, observed_at
+)
+GROUP BY taxon_id;
+
+
 -- =========================================================
 -- REPORT VIEWS
 -- =========================================================
@@ -828,30 +870,30 @@ SELECT
     i.reason_texts,
     i.top_priority,
     CASE
-        WHEN i.observation_count <= 3 THEN GROUP_CONCAT(TRIM(r.obs_text), '; ')
-        WHEN i.observation_count <= 5 THEN GROUP_CONCAT(CASE WHEN r.rn <= 3 THEN TRIM(r.obs_text) END, '; ')
-        ELSE NULL
+	WHEN i.observation_count <= 3
+             THEN oc.obs_texts
+    	WHEN i.observation_count <= 5
+             THEN oc.obs_texts
+    	ELSE NULL
     END AS obs_data,
+
     CASE
-        WHEN i.observation_count > 5 THEN
-            CAST(i.observation_count AS TEXT) || ' observationer i ' ||
-            CAST(i.municipality_count AS TEXT) || ' kommuner. ' ||
-            COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
-        ELSE
-            TRIM(
-                REPLACE(
-                    REPLACE(
-                        COALESCE(REPLACE(i.reason_texts, ',', ', '), ''),
-                        'Få observationer under året, ', ''
-                    ),
-                    ', Få observationer under året', ''
-                )
-            )
-    END AS closing_comment
+	WHEN i.observation_count > 5 THEN
+             CAST(i.observation_count AS TEXT) || ' observationer i ' ||
+             CASE
+		WHEN i.municipality_count = 1
+             	THEN '1 kommun'
+         	ELSE CAST(i.municipality_count AS TEXT) || ' kommuner'
+	      END
+              || '. ' ||
+              COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+    	 ELSE
+	      COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+    END AS closing_comment			 
+
 FROM v_interesting_family_species i
-LEFT JOIN v_ranked_observations r
-    ON r.taxon_id = i.taxon_id
-   AND r.rn <= 5
+LEFT JOIN v_obs_concat oc
+    ON oc.taxon_id = i.taxon_id
 LEFT JOIN family_names_sv fsv
     ON fsv.family_name = i.family_name
 LEFT JOIN v_author_display ad
@@ -873,7 +915,6 @@ GROUP BY
 ORDER BY
     i.taxon_sort_order,
     i.scientific_name;
-
 
 DROP VIEW IF EXISTS v_report_lines;
 CREATE VIEW v_report_lines AS
@@ -984,6 +1025,8 @@ ORDER BY
     section_sort,
     line_sort,
     line;
+
+-- Find out why these are needed!!
 
 DROP VIEW IF EXISTS v_suspect_non_lep_families;
 CREATE VIEW v_suspect_non_lep_families AS
