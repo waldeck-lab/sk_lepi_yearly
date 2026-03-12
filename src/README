@@ -1,13 +1,10 @@
 # Clean run (2025 example, and Skåne: Province-1)
 source ../config/settings.env
-export SOS_YEAR=2025
-export SOS_PROVINCE_FEATURE_ID=1
 python3 init_sqlite_db.py
 python3 sync_sos_sqlite.py
+sqlite3 obsperyear.sqlite < new_spec_sk_2025.sql
 python3 import_dyntaxa_dwca.py
 python3 init_sqlite_db.py
-
-
 
 ## Add 'new species'
 # Open db:
@@ -15,7 +12,7 @@ sqlite3 obsperyear.sqlite
 
 ## Set year:
 UPDATE app_config
-SET config_value = '2025'
+SET config_value = '2025';
 
 # Drop in the INSERT part of "new_spec_sk_2025.txt" 
 
@@ -49,6 +46,15 @@ SELECT family_name, COUNT(*) FROM v_family_species_summary_2025 GROUP BY family_
 SELECT report_line
 FROM v_report_lines
 WHERE family_name = 'Zygaenidae';
+
+#####
+# Report view
+SELECT line
+FROM v_report_output;
+
+# Alternative
+sqlite3 obsperyear.sqlite "SELECT line FROM v_report_output;" > report.txt
+
 
 
 

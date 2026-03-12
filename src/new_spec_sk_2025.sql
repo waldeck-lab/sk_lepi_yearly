@@ -1,6 +1,6 @@
-## Searched 1900-2024, then compared with 1900-2025
-
-
+-- file: ../sql/new_spec_sk_2025.sql
+-- Searched 1900-2024, then compared with 1900-2025
+-- add with sqlite3 obsperyear.sqlite < new_spec_sk_2025.sql
 INSERT OR IGNORE INTO species_skane_history
 (taxon_id, scientific_name, first_known_year_in_skane)
 VALUES

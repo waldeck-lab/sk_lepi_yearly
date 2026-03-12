@@ -245,6 +245,28 @@ FROM app_config
 WHERE config_key = 'report_year';
 
 
+
+-- =========================================================
+-- Sorting views
+-- =========================================================
+
+DROP VIEW IF EXISTS v_family_sort_order;
+CREATE VIEW v_family_sort_order AS
+SELECT
+    COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
+    MIN(o.taxon_sort_order) AS family_sort_order
+FROM observations o
+LEFT JOIN taxa t
+    ON t.taxon_id = o.taxon_id
+LEFT JOIN family_overrides fo
+    ON fo.scientific_name = o.scientific_name
+JOIN v_report_year y
+WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
+  AND o.scientific_name NOT LIKE '%/%'
+  AND COALESCE(t.taxon_rank, '') = 'species'
+GROUP BY COALESCE(t.family_name, fo.family_name, '[okänd familj]');
+
+
 -- =========================================================
 -- CORE VIEWS
 -- =========================================================
@@ -351,6 +373,7 @@ DROP VIEW IF EXISTS v_family_species_summary;
 CREATE VIEW v_family_species_summary AS
 SELECT
     COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
+    MIN(o.taxon_sort_order) AS taxon_sort_order,
     s.taxon_id,
     s.scientific_name,
     s.common_name,
@@ -364,14 +387,29 @@ SELECT
     s.last_obs,
     s.municipalities
 FROM v_species_summary s
+JOIN observations o
+    ON o.taxon_id = s.taxon_id
 LEFT JOIN taxa t
     ON t.taxon_id = s.taxon_id
 LEFT JOIN family_overrides fo
     ON fo.scientific_name = s.scientific_name
-ORDER BY
-    family_name,
-    s.scientific_name;
-
+JOIN v_report_year y
+WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
+GROUP BY
+    COALESCE(t.family_name, fo.family_name, '[okänd familj]'),
+    s.taxon_id,
+    s.scientific_name,
+    s.common_name,
+    s.author_text,
+    s.red_list_code,
+    s.observation_count,
+    s.municipality_count,
+    s.reporter_count,
+    s.verified_count,
+    s.first_obs,
+    s.last_obs,
+    s.municipalities;
+    
 -- =========================================================
 -- REASON FLAGS
 -- =========================================================
@@ -513,6 +551,7 @@ DROP VIEW IF EXISTS v_interesting_family_species;
 CREATE VIEW v_interesting_family_species AS
 SELECT
     COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
+    MIN(o.taxon_sort_order) AS taxon_sort_order,
     i.taxon_id,
     i.scientific_name,
     i.common_name,
@@ -529,14 +568,31 @@ SELECT
     i.reason_texts,
     i.top_priority
 FROM v_interesting_species i
+JOIN observations o
+    ON o.taxon_id = i.taxon_id
 LEFT JOIN taxa t
     ON t.taxon_id = i.taxon_id
 LEFT JOIN family_overrides fo
     ON fo.scientific_name = i.scientific_name
-ORDER BY
-    family_name,
-    top_priority,
-    i.scientific_name;
+JOIN v_report_year y
+WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
+GROUP BY
+    COALESCE(t.family_name, fo.family_name, '[okänd familj]'),
+    i.taxon_id,
+    i.scientific_name,
+    i.common_name,
+    i.author_text,
+    i.red_list_code,
+    i.observation_count,
+    i.municipality_count,
+    i.reporter_count,
+    i.verified_count,
+    i.first_obs,
+    i.last_obs,
+    i.municipalities,
+    i.reason_codes,
+    i.reason_texts,
+    i.top_priority;
 
 -- =========================================================
 -- AUTHOR DISPLAY
@@ -760,16 +816,20 @@ CREATE VIEW v_report_draft AS
 SELECT
     i.family_name,
     COALESCE(fsv.family_name_sv, '') AS family_name_sv,
+    i.taxon_sort_order,
+    i.taxon_id,
     i.scientific_name,
     COALESCE(ad.author_display, i.author_text) AS author_short,
     i.common_name,
     i.red_list_code,
     i.observation_count,
+    i.municipality_count,
     i.reason_codes,
     i.reason_texts,
     i.top_priority,
     CASE
-        WHEN i.observation_count <= 5 THEN GROUP_CONCAT(r.obs_text, '. ')
+        WHEN i.observation_count <= 3 THEN GROUP_CONCAT(TRIM(r.obs_text), '; ')
+        WHEN i.observation_count <= 5 THEN GROUP_CONCAT(CASE WHEN r.rn <= 3 THEN TRIM(r.obs_text) END, '; ')
         ELSE NULL
     END AS obs_data,
     CASE
@@ -778,7 +838,15 @@ SELECT
             CAST(i.municipality_count AS TEXT) || ' kommuner. ' ||
             COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
         ELSE
-            COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+            TRIM(
+                REPLACE(
+                    REPLACE(
+                        COALESCE(REPLACE(i.reason_texts, ',', ', '), ''),
+                        'Få observationer under året, ', ''
+                    ),
+                    ', Få observationer under året', ''
+                )
+            )
     END AS closing_comment
 FROM v_interesting_family_species i
 LEFT JOIN v_ranked_observations r
@@ -791,6 +859,7 @@ LEFT JOIN v_author_display ad
 GROUP BY
     i.family_name,
     fsv.family_name_sv,
+    i.taxon_sort_order,
     i.taxon_id,
     i.scientific_name,
     COALESCE(ad.author_display, i.author_text),
@@ -802,40 +871,47 @@ GROUP BY
     i.reason_texts,
     i.top_priority
 ORDER BY
-    i.family_name,
+    i.taxon_sort_order,
     i.scientific_name;
+
 
 DROP VIEW IF EXISTS v_report_lines;
 CREATE VIEW v_report_lines AS
 SELECT
-    family_name,
-    family_name_sv,
-    scientific_name,
-    author_short,
-    common_name,
-    red_list_code,
-    top_priority,
+    d.family_name,
+    d.family_name_sv,
+    d.taxon_sort_order,
+    d.scientific_name,
+    d.author_short,
+    d.common_name,
+    d.red_list_code,
+    d.top_priority,
     TRIM(
-        scientific_name
-        || CASE WHEN author_short IS NOT NULL AND author_short <> '' THEN ' (' || author_short || ')' ELSE '' END
-        || CASE WHEN common_name IS NOT NULL AND common_name <> '' THEN ', ' || common_name ELSE '' END
-        || CASE WHEN red_list_code IS NOT NULL AND red_list_code <> '' THEN ', ' || red_list_code ELSE '' END
-        || ': '
+        d.scientific_name
+        || CASE WHEN d.author_short IS NOT NULL AND d.author_short <> '' THEN ' (' || d.author_short || ')' ELSE '' END
         || CASE
-            WHEN obs_data IS NOT NULL AND obs_data <> '' THEN obs_data
+            WHEN d.common_name IS NOT NULL AND d.common_name <> '' THEN ', ' || d.common_name
             ELSE ''
            END
         || CASE
-            WHEN closing_comment IS NOT NULL AND closing_comment <> '' THEN
+            WHEN d.red_list_code IN ('CR','EN','VU','NT') THEN ', ' || d.red_list_code
+            ELSE ''
+           END
+        || ': '
+        || CASE
+            WHEN d.obs_data IS NOT NULL AND d.obs_data <> '' THEN d.obs_data
+            ELSE ''
+           END
+        || CASE
+            WHEN d.closing_comment IS NOT NULL AND d.closing_comment <> '' THEN
                 CASE
-                    WHEN obs_data IS NOT NULL AND obs_data <> '' THEN '. ' || closing_comment
-                    ELSE closing_comment
+                    WHEN d.obs_data IS NOT NULL AND d.obs_data <> '' THEN '. ' || d.closing_comment
+                    ELSE d.closing_comment
                 END
             ELSE ''
            END
     ) AS report_line
-FROM v_report_draft
-ORDER BY family_name, scientific_name;
+FROM v_report_draft d;
 
 DROP VIEW IF EXISTS v_family_headers;
 CREATE VIEW v_family_headers AS
@@ -850,4 +926,71 @@ SELECT DISTINCT
 FROM v_report_lines
 ORDER BY family_name;
 
+DROP VIEW IF EXISTS v_report_output;
+CREATE VIEW v_report_output AS
+WITH families AS (
+    SELECT DISTINCT
+        rl.family_name,
+        rl.family_name_sv,
+        fs.family_sort_order
+    FROM v_report_lines rl
+    LEFT JOIN v_family_sort_order fs
+        ON fs.family_name = rl.family_name
+),
+family_headers AS (
+    SELECT
+        family_name,
+        family_sort_order,
+        0 AS section_sort,
+        0 AS line_sort,
+        CASE
+            WHEN family_name_sv IS NOT NULL AND family_name_sv <> ''
+            THEN family_name || ' – ' || family_name_sv
+            ELSE family_name
+        END AS line
+    FROM families
+),
+family_spacer AS (
+    SELECT
+        family_name,
+        family_sort_order,
+        1 AS section_sort,
+        0 AS line_sort,
+        '' AS line
+    FROM families
+),
+species_lines AS (
+    SELECT
+        rl.family_name,
+        fs.family_sort_order,
+        2 AS section_sort,
+        rl.taxon_sort_order AS line_sort,
+        rl.report_line AS line
+    FROM v_report_lines rl
+    LEFT JOIN v_family_sort_order fs
+        ON fs.family_name = rl.family_name
+)
+SELECT line
+FROM (
+    SELECT * FROM family_headers
+    UNION ALL
+    SELECT * FROM family_spacer
+    UNION ALL
+    SELECT * FROM species_lines
+)
+ORDER BY
+    family_sort_order,
+    family_name,
+    section_sort,
+    line_sort,
+    line;
 
+DROP VIEW IF EXISTS v_suspect_non_lep_families;
+CREATE VIEW v_suspect_non_lep_families AS
+SELECT *
+FROM v_family_species_summary
+WHERE family_name IN (
+    'Anthicidae',
+    'Hyaloscyphaceae',
+    'Ectinosomatidae'
+);

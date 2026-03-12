@@ -21,13 +21,10 @@ SYNC_NAME = f"lepidoptera_province_{PROVINCE_FEATURE_ID}_{YEAR}"
 
 
 API_KEY = os.getenv("SOS_API_KEY", "")
-AUTH_TOKEN = os.getenv("SOS_AUTH_TOKEN", "")
 
 if not API_KEY:
     raise RuntimeError("Missing SOS_API_KEY environment variable")
 
-if not AUTH_TOKEN:
-    raise RuntimeError("Missing SOS_AUTH_TOKEN environment variable")
 
 HEADERS = {
     "X-Api-Version": "1.5",
@@ -35,7 +32,6 @@ HEADERS = {
     "Cache-Control": "no-cache",
     "Accept-Encoding": "gzip, deflate",
     "Ocp-Apim-Subscription-Key": API_KEY,
-    "Authorization": f"Bearer {AUTH_TOKEN}",
 }
 
 
@@ -132,6 +128,15 @@ def to_int_bool(value):
         return 0
     return None
 
+# Helper to clean up empty answers
+def to_int(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except:
+        return None
+
 def fetch_page(skip: int, take: int, payload: dict[str, Any], max_retries: int = 8):
     url = (
         f"{BASE_URL}/Observations/Search"
@@ -165,7 +170,13 @@ def fetch_page(skip: int, take: int, payload: dict[str, Any], max_retries: int =
             wait_seconds = min(wait_seconds * 2, 300)
             continue
 
-        resp.raise_for_status()
+        if not resp.ok:
+            print("Request payload:")
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            print("Response body:")
+            print(resp.text)
+            resp.raise_for_status()
+
         return resp.json()
 
     raise RuntimeError(f"Failed to fetch page after repeated retries at skip={skip}")
@@ -176,24 +187,25 @@ def extract_row(rec: dict[str, Any]):
         return None
 
     taxon_attrs = get_nested(rec, ["taxon", "attributes"], {}) or {}
-
-    red_list_code = taxon_attrs.get("redlistCategory")
-    source_comment = get_nested(rec, ["occurrence", "occurrenceRemarks"])
-    socken = get_nested(rec, ["location", "parish", "name"])
-
+    # Local helpers:
+    # 1. Remove empty strings and use NULL for better code
+    life_stage = get_nested(rec, ["occurrence", "lifeStage", "value"]) or None 
+    # 2. Get either activty or behaviour if present
+    method = (get_nested(rec, ["occurrence", "activity", "value"])
+              or get_nested(rec, ["occurrence", "behavior", "value"]))
     
     return (
         str(obs_id),
         get_nested(rec, ["taxon", "id"]),
-        get_nested(rec, ["taxon", "sortOrder"]),
+        get_nested(rec, ["taxon", "attributes", "sortOrder"]),
         taxon_attrs.get("redlistCategory"),
         get_nested(rec, ["taxon", "vernacularName"]),
         get_nested(rec, ["taxon", "scientificName"]),
         get_nested(rec, ["taxon", "author"]),
-        get_nested(rec, ["occurrence", "individualCount"]),
-        get_nested(rec, ["occurrence", "lifeStage", "value"]),
+        to_int(get_nested(rec, ["occurrence", "individualCount"])),
+        life_stage, 
         get_nested(rec, ["occurrence", "sex", "value"]),
-        get_nested(rec, ["occurrence", "behavior", "value"]),
+        method, 
         get_nested(rec, ["location", "locality"]),
         get_nested(rec, ["location", "parish", "name"]),
         get_nested(rec, ["occurrence", "recordedBy"]),
@@ -204,7 +216,7 @@ def extract_row(rec: dict[str, Any]):
         rec.get("datasetName"),
         get_nested(rec, ["location", "county", "featureId"]),
         get_nested(rec, ["location", "county", "name"]),
-        get_nested(rec, ["location", "province", "featureId"]),
+        int(get_nested(rec, ["location", "province", "featureId"])),
         get_nested(rec, ["location", "province", "name"]),
         get_nested(rec, ["location", "municipality", "featureId"]),
         get_nested(rec, ["location", "municipality", "name"]),
@@ -243,42 +255,33 @@ def build_payload(start_date: str, end_date: str) -> dict:
             "ids": [TAXON_ROOT],
             "includeUnderlyingTaxa": True
         },
-
         "geographics": {
             "areas": [
                 {
                     "areaType": "Province",
-                    "featureId": PROVINCE_FEATURE_ID
+                    "featureId": str(PROVINCE_FEATURE_ID)
                 }
             ]
         },
-
         "date": {
             "startDate": start_date,
             "endDate": end_date,
             "dateFilterType": "BetweenStartDateAndEndDate"
         },
-
         "dataProvider": {
             "ids": [DATA_PROVIDER_ID]
         },
-
         "occurrenceStatus": "present",
-
         "determinationFilter": "NotUnsureDetermination",
-
         "notRecoveredFilter": "DontIncludeNotRecovered",
-
         "output": {
             "fieldSet": "Minimum",
             "fields": [
                 "datasetName",
                 "event.startDate",
                 "event.endDate",
-
                 "identification.verified",
                 "identification.uncertainIdentification",
-
                 "location.locality",
                 "location.county",
                 "location.province",
@@ -287,15 +290,13 @@ def build_payload(start_date: str, end_date: str) -> dict:
                 "location.decimalLatitude",
                 "location.decimalLongitude",
                 "location.coordinateUncertaintyInMeters",
-
                 "occurrence.occurrenceId",
                 "occurrence.recordedBy",
                 "occurrence.reportedBy",
                 "occurrence.individualCount",
                 "occurrence.occurrenceRemarks",
-
                 "taxon.id",
-                "taxon.sortOrder",
+                "taxon.attributes.sortOrder",
                 "taxon.scientificName",
                 "taxon.vernacularName",
                 "taxon.author",
@@ -345,6 +346,8 @@ def save_progress(cur: sqlite3.Cursor, month_index: int, skip: int, total_count:
 def main():
     print(f"Starting sync for YEAR={YEAR}, PROVINCE_FEATURE_ID={PROVINCE_FEATURE_ID}, DATA_PROVIDER_ID={DATA_PROVIDER_ID}")
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     cur = conn.cursor()
 
     month_index, resume_skip = get_resume_state(cur)
