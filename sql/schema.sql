@@ -268,19 +268,10 @@ WHERE config_key = 'report_year';
 DROP VIEW IF EXISTS v_family_sort_order;
 CREATE VIEW v_family_sort_order AS
 SELECT
-    COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
-    MIN(o.taxon_sort_order) AS family_sort_order
-FROM observations o
-LEFT JOIN taxa t
-    ON t.taxon_id = o.taxon_id
-LEFT JOIN family_overrides fo
-    ON fo.scientific_name = o.scientific_name
-JOIN v_report_year y
-WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
-  AND o.scientific_name NOT LIKE '%/%'
-  AND COALESCE(t.taxon_rank, '') = 'species'
-GROUP BY COALESCE(t.family_name, fo.family_name, '[okänd familj]');
-
+    family_name,
+    MIN(taxon_sort_order) AS family_sort_order
+FROM v_interesting_family_species
+GROUP BY family_name;
 
 -- =========================================================
 -- Date spans (for large sets of observations)
@@ -756,50 +747,67 @@ SELECT
         ELSE TRIM(reporter)
     END AS short_reporter,
     TRIM(
+    REPLACE(
         REPLACE(
             REPLACE(
                 REPLACE(
-                    (
-                        CASE
-                            WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
-                            ELSE TRIM(individual_count) || ' ex'
-                        END
-                        || ', ' ||
-                        (CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
-                         CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER))
-                        || ', ' ||
-                        CASE
-                            WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
-                            WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
-                            ELSE TRIM(reporter)
-                        END
-                        || CASE
-                            WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
-                            THEN ', ' || TRIM(locality_clean)
-                            ELSE ''
-                           END
-                        || CASE
-                            WHEN socken_clean IS NOT NULL
-                             AND TRIM(socken_clean) <> ''
-                             AND socken_norm <> locality_norm
-                            THEN ', ' || TRIM(socken_clean)
-                            ELSE ''
-                           END
-                        || CASE
-                            WHEN source_comment IS NOT NULL
-                             AND TRIM(source_comment) <> ''
-                             AND length(TRIM(source_comment)) <= 120
-                            THEN ', ' || TRIM(source_comment)
-                            ELSE ''
-                           END
+                    REPLACE(
+                        REPLACE(
+                            (
+                                CASE
+                                    WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
+                                    ELSE TRIM(individual_count) || ' ex'
+                                END
+                                || ', ' ||
+                                (CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
+                                 CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER))
+                                || ', ' ||
+                                CASE
+                                    WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
+                                    WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
+                                    ELSE TRIM(reporter)
+                                END
+                                || CASE
+                                    WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
+                                    THEN ', ' || TRIM(locality_clean)
+                                    ELSE ''
+                                   END
+				   || CASE
+    				      WHEN socken_clean IS NOT NULL
+				      	   AND TRIM(socken_clean) <> ''
+				      	   AND (
+				      	       locality_clean IS NULL
+				      	            OR TRIM(locality_clean) = ''
+				      		    OR (
+				      		       LOWER(TRIM(socken_clean)) <> LOWER(TRIM(locality_clean))
+				      		       AND instr(LOWER(TRIM(locality_clean)), LOWER(TRIM(socken_clean))) = 0
+				      		    )
+				           )
+				      	   THEN ', ' || TRIM(socken_clean)
+				      	   ELSE ''
+				      END
+                                || CASE
+                                    WHEN source_comment IS NOT NULL
+                                     AND TRIM(source_comment) <> ''
+                                     AND length(TRIM(source_comment)) <= 120
+                                    THEN ', ' || TRIM(source_comment)
+                                    ELSE ''
+                                   END
+                            ),
+                            ', ,', ', '
+                        ),
+                        ',,', ','
                     ),
-                    ', ,', ', '
+                    ', .', '.'
                 ),
-                ',  ', ', '
+                '..', '.'
             ),
             '  ', ' '
-        )
+        ),
+        ' ,', ','
+    )
     ) AS obs_text
+
 FROM normed;
 
 DROP VIEW IF EXISTS v_observation_editorial_dedup;
@@ -897,53 +905,51 @@ SELECT
     	ELSE NULL
     END AS obs_data,
 
-    CASE
-	WHEN i.observation_count > 5 THEN
-             CAST(i.observation_count AS TEXT) || ' observationer i ' ||
-             CASE
-		WHEN i.municipality_count = 1 THEN '1 kommun'
-            	ELSE CAST(i.municipality_count AS TEXT) || ' kommuner'
-             END
-             || CASE
-             	WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
-                     CASE
-			WHEN ds.first_date = ds.last_date
-                    	THEN ' (' || ds.first_date || ')'
-                    	ELSE ' (' || ds.first_date || '–' || ds.last_date || ')'
-                     END
-            	ELSE ''
-             END
-             || '. ' || COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+CASE
+    -- många observationer: ingen obs_data visas
+    WHEN i.observation_count > 5 THEN
+         CAST(i.observation_count AS TEXT) || ' observationer i ' ||
+         CASE
+            WHEN i.municipality_count = 1 THEN '1 kommun'
+            ELSE CAST(i.municipality_count AS TEXT) || ' kommuner'
+         END
+         || CASE
+                WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
+                    CASE
+                        WHEN ds.first_date = ds.last_date
+                        THEN ' (' || ds.first_date || ')'
+                        ELSE ' (' || ds.first_date || '–' || ds.last_date || ')'
+                    END
+                ELSE ''
+            END
+         || '. ' || COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
 
-    	WHEN i.observation_count = 1 THEN
-             '1 observation'
-             || CASE
-             	WHEN ds.first_date IS NOT NULL THEN ' (' || ds.first_date || ')'
-            	ELSE ''
-             END
-             || CASE
-             	WHEN COALESCE(i.reason_texts, '') <> '' THEN '. ' || REPLACE(i.reason_texts, ',', ', ')
-            	ELSE ''
-             END
+    -- få observationer: obs_data finns redan → bara reasons
+    WHEN i.observation_count <= 3 THEN
+         COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
 
-    	WHEN i.observation_count = 2 THEN
-             '2 observationer'
-             || CASE
-             	WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
-                     CASE
-			WHEN ds.first_date = ds.last_date
-                    	THEN ' (' || ds.first_date || ')'
-                    	ELSE ' (' || ds.first_date || '–' || ds.last_date || ')'
-                     END
-            	 ELSE ''
-               END
-             || CASE
-             	WHEN COALESCE(i.reason_texts, '') <> '' THEN '. ' || REPLACE(i.reason_texts, ',', ', ')
-            	ELSE ''
-             END
-        ELSE
-	     COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
-    END AS closing_comment
+    -- 4–5 observationer: obs_data visar några fynd → lägg till datumspann
+    WHEN i.observation_count <= 5 THEN
+         CASE
+            WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
+                CASE
+                    WHEN ds.first_date = ds.last_date
+                    THEN '(' || ds.first_date || ')'
+                    ELSE '(' || ds.first_date || '–' || ds.last_date || ')'
+                END
+            ELSE ''
+         END
+         || CASE
+                WHEN COALESCE(i.reason_texts, '') <> ''
+                THEN '. ' || REPLACE(i.reason_texts, ',', ', ')
+                ELSE ''
+            END
+
+    ELSE
+         COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+
+END AS closing_comment
+
 FROM v_interesting_family_species i
 LEFT JOIN v_obs_concat oc
     ON oc.taxon_id = i.taxon_id
@@ -1055,7 +1061,7 @@ family_spacer AS (
         family_sort_order,
         1 AS section_sort,
         0 AS line_sort,
-        '' AS line
+        ' ' AS line
     FROM families
 ),
 species_lines AS (
