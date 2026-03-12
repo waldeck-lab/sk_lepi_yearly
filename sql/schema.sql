@@ -283,6 +283,25 @@ GROUP BY COALESCE(t.family_name, fo.family_name, '[okänd familj]');
 
 
 -- =========================================================
+-- Date spans (for large sets of observations)
+-- =========================================================
+
+DROP VIEW IF EXISTS v_species_date_span;
+CREATE VIEW v_species_date_span AS
+SELECT
+    taxon_id,
+    MIN(observed_at) AS first_observed_at,
+    MAX(observed_at) AS last_observed_at,
+    CAST(strftime('%d', substr(MIN(observed_at),1,19)) AS INTEGER) || '/' ||
+    CAST(strftime('%m', substr(MIN(observed_at),1,19)) AS INTEGER) AS first_date,
+    CAST(strftime('%d', substr(MAX(observed_at),1,19)) AS INTEGER) || '/' ||
+    CAST(strftime('%m', substr(MAX(observed_at),1,19)) AS INTEGER) AS last_date
+FROM observations o
+JOIN v_report_year y
+WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
+GROUP BY taxon_id;
+
+-- =========================================================
 -- CORE VIEWS
 -- =========================================================
 
@@ -656,6 +675,7 @@ LEFT JOIN author_abbrev a
 -- =========================================================
 -- EDITORIAL OBSERVATION TEXT
 -- =========================================================
+
 DROP VIEW IF EXISTS v_observation_editorial;
 CREATE VIEW v_observation_editorial AS
 WITH base AS (
@@ -669,21 +689,18 @@ WITH base AS (
         o.common_name,
         o.red_list_code,
         o.reporter,
-
         o.locality,
         CASE
             WHEN o.locality IS NULL THEN NULL
             WHEN TRIM(o.locality) LIKE '%, Sk' THEN TRIM(substr(TRIM(o.locality), 1, length(TRIM(o.locality)) - 4))
             ELSE TRIM(o.locality)
         END AS locality_clean,
-
         o.socken,
         CASE
             WHEN o.socken IS NULL THEN NULL
             WHEN TRIM(o.socken) LIKE 'Sk,%' THEN TRIM(substr(TRIM(o.socken), 4))
             ELSE TRIM(o.socken)
         END AS socken_clean,
-
         o.source_comment,
         o.individual_count,
         o.observed_at,
@@ -701,6 +718,13 @@ WITH base AS (
     WHERE substr(o.observed_at,1,4) = CAST(y.report_year AS TEXT)
       AND o.scientific_name NOT LIKE '%/%'
       AND COALESCE(t.taxon_rank, '') = 'species'
+),
+normed AS (
+    SELECT
+        *,
+        LOWER(TRIM(REPLACE(REPLACE(REPLACE(COALESCE(locality_clean,''), '.', ''), ',', ''), '  ', ' '))) AS locality_norm,
+        LOWER(TRIM(REPLACE(REPLACE(REPLACE(COALESCE(socken_clean,''), '.', ''), ',', ''), '  ', ' '))) AS socken_norm
+    FROM base
 )
 SELECT
     obs_id,
@@ -720,21 +744,17 @@ SELECT
     individual_count,
     observed_at,
     verified,
-
     CASE
         WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
         ELSE TRIM(individual_count) || ' ex'
     END AS count_text,
-
     CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
     CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER) AS short_date,
-
     CASE
         WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
         WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
         ELSE TRIM(reporter)
     END AS short_reporter,
-
     TRIM(
         REPLACE(
             REPLACE(
@@ -761,7 +781,7 @@ SELECT
                         || CASE
                             WHEN socken_clean IS NOT NULL
                              AND TRIM(socken_clean) <> ''
-                             AND LOWER(TRIM(socken_clean)) <> LOWER(TRIM(locality_clean))
+                             AND socken_norm <> locality_norm
                             THEN ', ' || TRIM(socken_clean)
                             ELSE ''
                            END
@@ -780,7 +800,7 @@ SELECT
             '  ', ' '
         )
     ) AS obs_text
-FROM base;
+FROM normed;
 
 DROP VIEW IF EXISTS v_observation_editorial_dedup;
 CREATE VIEW v_observation_editorial_dedup AS
@@ -881,16 +901,49 @@ SELECT
 	WHEN i.observation_count > 5 THEN
              CAST(i.observation_count AS TEXT) || ' observationer i ' ||
              CASE
-		WHEN i.municipality_count = 1
-             	THEN '1 kommun'
-         	ELSE CAST(i.municipality_count AS TEXT) || ' kommuner'
-	      END
-              || '. ' ||
-              COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
-    	 ELSE
-	      COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
-    END AS closing_comment			 
+		WHEN i.municipality_count = 1 THEN '1 kommun'
+            	ELSE CAST(i.municipality_count AS TEXT) || ' kommuner'
+             END
+             || CASE
+             	WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
+                     CASE
+			WHEN ds.first_date = ds.last_date
+                    	THEN ' (' || ds.first_date || ')'
+                    	ELSE ' (' || ds.first_date || '–' || ds.last_date || ')'
+                     END
+            	ELSE ''
+             END
+             || '. ' || COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
 
+    	WHEN i.observation_count = 1 THEN
+             '1 observation'
+             || CASE
+             	WHEN ds.first_date IS NOT NULL THEN ' (' || ds.first_date || ')'
+            	ELSE ''
+             END
+             || CASE
+             	WHEN COALESCE(i.reason_texts, '') <> '' THEN '. ' || REPLACE(i.reason_texts, ',', ', ')
+            	ELSE ''
+             END
+
+    	WHEN i.observation_count = 2 THEN
+             '2 observationer'
+             || CASE
+             	WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
+                     CASE
+			WHEN ds.first_date = ds.last_date
+                    	THEN ' (' || ds.first_date || ')'
+                    	ELSE ' (' || ds.first_date || '–' || ds.last_date || ')'
+                     END
+            	 ELSE ''
+               END
+             || CASE
+             	WHEN COALESCE(i.reason_texts, '') <> '' THEN '. ' || REPLACE(i.reason_texts, ',', ', ')
+            	ELSE ''
+             END
+        ELSE
+	     COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+    END AS closing_comment
 FROM v_interesting_family_species i
 LEFT JOIN v_obs_concat oc
     ON oc.taxon_id = i.taxon_id
@@ -898,6 +951,9 @@ LEFT JOIN family_names_sv fsv
     ON fsv.family_name = i.family_name
 LEFT JOIN v_author_display ad
     ON ad.taxon_id = i.taxon_id
+LEFT JOIN v_species_date_span ds
+    ON ds.taxon_id = i.taxon_id
+    
 GROUP BY
     i.family_name,
     fsv.family_name_sv,
@@ -911,7 +967,9 @@ GROUP BY
     i.municipality_count,
     i.reason_codes,
     i.reason_texts,
-    i.top_priority
+    i.top_priority,
+    ds.first_date,
+    ds.last_date
 ORDER BY
     i.taxon_sort_order,
     i.scientific_name;
