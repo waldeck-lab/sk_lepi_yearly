@@ -1,2 +1,4 @@
-config/settings.env
-db/obsperyear.sqlite
+obsperyear.sqlite
+dwca
+*~
+report*

@@ -17,7 +17,7 @@ fi
 
 URL="https://api.artdatabanken.se/taxonservice/v1/darwincore/download"
 
-WORKDIR="$SKLEPI_ROOT/dwca"
+WORKDIR="$SKLEPI_ROOT"
 TMP="$WORKDIR/tmp_dwca"
 
 mkdir -p "$TMP"

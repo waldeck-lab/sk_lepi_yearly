@@ -4,13 +4,14 @@ import os
 import sqlite3
 import time
 from calendar import monthrange
+from pathlib import Path
 from typing import Any
 
 import requests
 
-DB_PATH = "obsperyear.sqlite"
+ROOT_DIR = Path(os.getenv("SKLEPI_ROOT", Path(__file__).resolve().parents[1]))
+DB_PATH = str(Path(os.getenv("SKLEPI_DB_PATH", ROOT_DIR / "db" / "obsperyear.sqlite")))
 BASE_URL = "https://api.artdatabanken.se/species-observation-system/v1"
-
 
 YEAR = int(os.getenv("SOS_YEAR", "2025"))
 PROVINCE_FEATURE_ID = os.getenv("SOS_PROVINCE_FEATURE_ID", "1") # 1 - Skåne

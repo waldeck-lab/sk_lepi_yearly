@@ -1,8 +1,10 @@
 # Clean run (2025 example, and Skåne: Province-1)
 source ../config/settings.env
+source ./common.env
+./scripts/update_taxonomy.sh
 python3 init_sqlite_db.py
 python3 sync_sos_sqlite.py
-sqlite3 obsperyear.sqlite < new_spec_sk_2025.sql
+sqlite3 obsperyear.sqlite < new_spec_sk_2025.sql # Insert manually found new species for Skane 
 python3 import_dyntaxa_dwca.py
 python3 init_sqlite_db.py
 
@@ -33,7 +35,7 @@ SELECT family_name, COUNT(*) FROM v_family_species_summary_2025 GROUP BY family_
 
 
 # Yet another test (report of Zygaena)
-sqlite3 obsperyear.sqlite "SELECT report_line FROM v_report_lines WHERE family_name = 'Zygaenidae';"
+sqlite3 $SKLEPI_DB_PATH "SELECT report_line FROM v_report_lines WHERE family_name = 'Zygaenidae';"
 
 
 #####
@@ -41,7 +43,6 @@ sqlite3 obsperyear.sqlite "SELECT report_line FROM v_report_lines WHERE family_n
 sqlite3 obsperyear.sqlite "SELECT line FROM v_report_output;"
 
 # Alternative
-sqlite3 obsperyear.sqlite "SELECT line FROM v_report_output;" > report.txt
 sqlite3 obsperyear.sqlite "SELECT line FROM v_report_output;" > report.txt
 
 

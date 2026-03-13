@@ -1,6 +1,6 @@
 -- file: ./sql/schema.sql
 PRAGMA foreign_keys = ON;
-
+BEGIN; 
 -- =========================================================
 -- TABLES
 -- =========================================================
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS observations (
     scientific_name TEXT,
     author_text TEXT,
 
-    individual_count TEXT,
+    individual_count REAL,
     life_stage TEXT,
     sex TEXT,
     method TEXT,
@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS observations (
     raw_json TEXT,
 
     imported_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (taxon_id) REFERENCES taxa(taxon_id)
 );
 
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -79,6 +81,7 @@ CREATE TABLE IF NOT EXISTS species_skane_history (
 
 CREATE TABLE IF NOT EXISTS taxa (
     taxon_id INTEGER PRIMARY KEY,
+    taxon_lsid TEXT UNIQUE,
     accepted_taxon_id INTEGER,
     parent_taxon_id INTEGER,
     scientific_name TEXT,
@@ -93,9 +96,15 @@ CREATE TABLE IF NOT EXISTS taxa (
     phylum_name TEXT,
     kingdom_name TEXT,
     taxonomic_status TEXT,
+    nomenclatural_status TEXT,
+    taxon_remarks TEXT,
     raw_json TEXT,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (accepted_taxon_id) REFERENCES taxa(taxon_id),
+    FOREIGN KEY (parent_taxon_id) REFERENCES taxa(taxon_id)
 );
+
 
 CREATE TABLE IF NOT EXISTS family_overrides (
     scientific_name TEXT PRIMARY KEY,
@@ -130,10 +139,19 @@ CREATE INDEX IF NOT EXISTS idx_obs_taxon_date ON observations(taxon_id, observed
 CREATE INDEX IF NOT EXISTS idx_obs_taxon_verified ON observations(taxon_id, verified);
 CREATE INDEX IF NOT EXISTS idx_obs_taxon_sort_order ON observations(taxon_sort_order);
 CREATE INDEX IF NOT EXISTS idx_obs_year_taxon ON observations(observed_at, taxon_id);
+
 CREATE INDEX IF NOT EXISTS idx_taxa_family ON taxa(family_name);
 CREATE INDEX IF NOT EXISTS idx_taxa_order ON taxa(order_name);
 CREATE INDEX IF NOT EXISTS idx_taxa_rank ON taxa(taxon_rank);
 CREATE INDEX IF NOT EXISTS idx_taxa_sciname ON taxa(scientific_name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_taxa_lsid ON taxa(taxon_lsid);
+CREATE INDEX IF NOT EXISTS idx_taxa_status ON taxa(taxonomic_status);
+CREATE INDEX IF NOT EXISTS idx_taxa_accepted_taxon_id ON taxa(accepted_taxon_id);
+CREATE INDEX IF NOT EXISTS idx_taxa_parent_taxon_id ON taxa(parent_taxon_id);
+
+-- =========================================================
+-- Alter tables
+-- =========================================================
 
 -- =========================================================
 -- SEED DATA
@@ -230,19 +248,20 @@ INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
 ('Müller', 'Müll.'),
 ('Röber', 'Röb.');
 
-INSERT OR IGNORE INTO species_skane_history
-(taxon_id, scientific_name, first_known_year_in_skane, note)
-VALUES
-(6010429, 'Agrochola lunosa', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(214165, 'Argyresthia ivella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(6332812, 'Caloptilia honoratella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(216027, 'Chloantha hyperici', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(100636, 'Chrysoclista lathamella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(214458, 'Coleophora juncicolella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(6011700, 'Diplopseustis perieresalis', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(6332811, 'Epiblema turbidana', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(216289, 'Euxoa ochrogaster', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
-(214233, 'Lyonetia ledi', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025');
+-- Dessa skall infogas manuellt via separat fil
+-- INSERT OR IGNORE INTO species_skane_history
+-- (taxon_id, scientific_name, first_known_year_in_skane, note)
+-- VALUES
+-- (6010429, 'Agrochola lunosa', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (214165, 'Argyresthia ivella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (6332812, 'Caloptilia honoratella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (216027, 'Chloantha hyperici', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (100636, 'Chrysoclista lathamella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (214458, 'Coleophora juncicolella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (6011700, 'Diplopseustis perieresalis', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (6332811, 'Epiblema turbidana', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (216289, 'Euxoa ochrogaster', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
+-- (214233, 'Lyonetia ledi', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025');
 
 
 
@@ -746,6 +765,12 @@ normed AS (
 prepared AS (
     SELECT
         *,
+	CASE
+		WHEN individual_count IS NULL THEN 'noterad'
+    		WHEN individual_count = CAST(individual_count AS INTEGER)
+        	     THEN printf('%d ex', CAST(individual_count AS INTEGER))
+    		ELSE printf('%g ex', individual_count)
+	END AS count_text,
         CASE
             WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
             ELSE TRIM(individual_count) || ' ex'
@@ -1294,3 +1319,6 @@ WHERE family_name IN (
     'Hyaloscyphaceae',
     'Ectinosomatidae'
 );
+
+
+COMMIT;

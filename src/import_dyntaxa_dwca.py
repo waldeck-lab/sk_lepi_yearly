@@ -1,9 +1,17 @@
+# file: ./src/import_dyntaxa_dwca.py
+# Description: Imports/updates last fetched DWCA CSV into the SQLite local DB
+
 import csv
+import json
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = "obsperyear.sqlite"
-TAXON_CSV = "proj_taxonomy/Taxon.csv"
+ROOT_DIR = Path(os.getenv("SKLEPI_ROOT", Path(__file__).resolve().parents[1]))
+DB_PATH = Path(os.getenv("SKLEPI_DB_PATH", ROOT_DIR / "db" / "obsperyear.sqlite"))
+TAXONOMY_DIR = Path(os.getenv("SKLEPI_TAXONOMY_DIR", ROOT_DIR / "dwca"))
+TAXON_CSV = TAXONOMY_DIR / "Taxon.csv"
+
 
 def lsid_to_int(value):
     if not value:
@@ -19,43 +27,24 @@ def lsid_to_int(value):
     except ValueError:
         return None
 
+
 def main():
-    taxon_path = Path(TAXON_CSV)
-    if not taxon_path.exists():
-        raise FileNotFoundError(f"Missing file: {taxon_path}")
+    if not TAXON_CSV.exists():
+        raise FileNotFoundError(f"Missing file: {TAXON_CSV}")
+
+    if not DB_PATH.exists():
+        raise FileNotFoundError(
+            f"Database file does not exist: {DB_PATH}. "
+            f"Initialize it first with schema.sql."
+        )
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS taxa (
-        taxon_id INTEGER PRIMARY KEY,
-        accepted_taxon_id INTEGER,
-        parent_taxon_id INTEGER,
-        scientific_name TEXT,
-        author_text TEXT,
-        vernacular_name TEXT,
-        taxon_rank TEXT,
-        family_name TEXT,
-        genus_name TEXT,
-        species_name TEXT,
-        order_name TEXT,
-        class_name TEXT,
-        phylum_name TEXT,
-        kingdom_name TEXT,
-        taxonomic_status TEXT,
-        raw_json TEXT,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_taxa_family ON taxa(family_name)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_taxa_order ON taxa(order_name)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_taxa_rank ON taxa(taxon_rank)")
-
     insert_sql = """
     INSERT INTO taxa (
         taxon_id,
+        taxon_lsid,
         accepted_taxon_id,
         parent_taxon_id,
         scientific_name,
@@ -70,11 +59,14 @@ def main():
         phylum_name,
         kingdom_name,
         taxonomic_status,
+        nomenclatural_status,
+        taxon_remarks,
         raw_json,
         updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(taxon_id) DO UPDATE SET
+        taxon_lsid = excluded.taxon_lsid,
         accepted_taxon_id = excluded.accepted_taxon_id,
         parent_taxon_id = excluded.parent_taxon_id,
         scientific_name = excluded.scientific_name,
@@ -89,29 +81,33 @@ def main():
         phylum_name = excluded.phylum_name,
         kingdom_name = excluded.kingdom_name,
         taxonomic_status = excluded.taxonomic_status,
+        nomenclatural_status = excluded.nomenclatural_status,
+        taxon_remarks = excluded.taxon_remarks,
         raw_json = excluded.raw_json,
         updated_at = CURRENT_TIMESTAMP
     """
 
     inserted = 0
 
-    with open(taxon_path, "r", encoding="utf-8-sig", newline="") as f:
+    with open(TAXON_CSV, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
         print("Columns found:")
         print(reader.fieldnames)
 
         for row in reader:
-            taxon_id = lsid_to_int(row.get("taxonId"))
+            taxon_lsid = row.get("taxonId")
+            taxon_id = lsid_to_int(taxon_lsid)
             if taxon_id is None:
                 continue
 
             values = (
                 taxon_id,
+                taxon_lsid,
                 lsid_to_int(row.get("acceptedNameUsageID")),
                 lsid_to_int(row.get("parentNameUsageID")),
                 row.get("scientificName"),
                 row.get("scientificNameAuthorship"),
-                None,  # fyller på svenska namn senare från VernacularName.csv
+                None,
                 row.get("taxonRank"),
                 row.get("family"),
                 row.get("genus"),
@@ -121,7 +117,9 @@ def main():
                 row.get("phylum"),
                 row.get("kingdom"),
                 row.get("taxonomicStatus"),
-                str(row),
+                row.get("nomenclaturalStatus"),
+                row.get("taxonRemarks"),
+                json.dumps(row, ensure_ascii=False),
             )
 
             cur.execute(insert_sql, values)
@@ -130,7 +128,7 @@ def main():
             if inserted <= 3:
                 print(
                     f"Sample {inserted}: "
-                    f"taxon_id={values[0]}, sci={values[3]}, rank={values[6]}, family={values[7]}"
+                    f"taxon_id={values[0]}, sci={values[4]}, rank={values[7]}, family={values[8]}"
                 )
 
     conn.commit()
@@ -141,6 +139,7 @@ def main():
     print("Rows now in taxa:", cur.fetchone()[0])
 
     conn.close()
+
 
 if __name__ == "__main__":
     main()
