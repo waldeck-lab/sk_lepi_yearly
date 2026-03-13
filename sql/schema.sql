@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS sync_state (
     last_run_at TEXT,
     last_skip INTEGER,
     last_total_count INTEGER,
-    notes TEXT
+    notes TEXT,
+    last_error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS species_manual_flags (
@@ -125,12 +126,12 @@ CREATE INDEX IF NOT EXISTS idx_obs_sciname ON observations(scientific_name);
 CREATE INDEX IF NOT EXISTS idx_obs_common_name ON observations(common_name);
 CREATE INDEX IF NOT EXISTS idx_obs_redlist ON observations(red_list_code);
 CREATE INDEX IF NOT EXISTS idx_obs_verified ON observations(verified);
-
+CREATE INDEX IF NOT EXISTS idx_obs_taxon_date ON observations(taxon_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_obs_taxon_verified ON observations(taxon_id, verified);
 CREATE INDEX IF NOT EXISTS idx_taxa_family ON taxa(family_name);
 CREATE INDEX IF NOT EXISTS idx_taxa_order ON taxa(order_name);
 CREATE INDEX IF NOT EXISTS idx_taxa_rank ON taxa(taxon_rank);
 CREATE INDEX IF NOT EXISTS idx_taxa_sciname ON taxa(scientific_name);
-
 -- =========================================================
 -- SEED DATA
 -- =========================================================
@@ -253,6 +254,7 @@ CREATE TABLE IF NOT EXISTS app_config (
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('report_year', '2025');
 
+-- #  v_report_year
 DROP VIEW IF EXISTS v_report_year;
 CREATE VIEW v_report_year AS
 SELECT CAST(config_value AS INTEGER) AS report_year
@@ -265,6 +267,7 @@ WHERE config_key = 'report_year';
 -- Sorting views
 -- =========================================================
 
+-- #  v_family_sort_order
 DROP VIEW IF EXISTS v_family_sort_order;
 CREATE VIEW v_family_sort_order AS
 SELECT
@@ -277,6 +280,7 @@ GROUP BY family_name;
 -- Date spans (for large sets of observations)
 -- =========================================================
 
+-- #  v_species_date_span
 DROP VIEW IF EXISTS v_species_date_span;
 CREATE VIEW v_species_date_span AS
 SELECT
@@ -296,6 +300,7 @@ GROUP BY taxon_id;
 -- CORE VIEWS
 -- =========================================================
 
+-- #  v_species_year_summary
 DROP VIEW IF EXISTS v_species_year_summary;
 CREATE VIEW v_species_year_summary AS
 SELECT
@@ -322,6 +327,7 @@ GROUP BY
     o.red_list_code;
 
 
+-- #  v_species_summary
 DROP VIEW IF EXISTS v_species_summary;
 
 CREATE VIEW v_species_summary AS
@@ -354,9 +360,8 @@ GROUP BY
     o.red_list_code,
     substr(o.observed_at, 1, 4);
     
-
+-- #  v_uncertain_species
 DROP VIEW IF EXISTS v_uncertain_species;
-
 CREATE VIEW v_uncertain_species AS
 SELECT
     o.taxon_id,
@@ -394,6 +399,7 @@ GROUP BY
     o.red_list_code,
     substr(o.observed_at, 1, 4);
 
+-- #  v_family_species_summary
 DROP VIEW IF EXISTS v_family_species_summary;
 CREATE VIEW v_family_species_summary AS
 SELECT
@@ -439,6 +445,7 @@ GROUP BY
 -- REASON FLAGS
 -- =========================================================
 
+-- #  v_all_species_reason_flags
 DROP VIEW IF EXISTS v_all_species_reason_flags;
 CREATE VIEW v_all_species_reason_flags AS
 SELECT
@@ -460,6 +467,7 @@ SELECT
 FROM species_manual_flags m;
 
 
+-- #  v_first_in_skane
 DROP VIEW IF EXISTS v_first_in_skane;
 CREATE VIEW v_first_in_skane AS
 SELECT
@@ -484,8 +492,8 @@ JOIN species_skane_history h
 JOIN v_report_year y
 WHERE h.first_known_year_in_skane = y.report_year;
 
+-- #  v_species_reason_flags
 DROP VIEW IF EXISTS v_species_reason_flags;
-
 CREATE VIEW v_species_reason_flags AS
 SELECT
     s.taxon_id,
@@ -534,6 +542,8 @@ SELECT
     f.priority
 FROM v_first_in_skane f;
 
+
+-- #  v_interresting_species
 DROP VIEW IF EXISTS v_interesting_species;
 CREATE VIEW v_interesting_species AS
 SELECT
@@ -572,6 +582,7 @@ ORDER BY
     top_priority,
     s.scientific_name;
 
+-- #  v_interresting_family_species
 DROP VIEW IF EXISTS v_interesting_family_species;
 CREATE VIEW v_interesting_family_species AS
 SELECT
@@ -623,6 +634,7 @@ GROUP BY
 -- AUTHOR DISPLAY
 -- =========================================================
 
+-- #  v_author_display
 DROP VIEW IF EXISTS v_author_display;
 CREATE VIEW v_author_display AS
 WITH author_base AS (
@@ -667,6 +679,7 @@ LEFT JOIN author_abbrev a
 -- EDITORIAL OBSERVATION TEXT
 -- =========================================================
 
+-- #  v_observation_editorial
 DROP VIEW IF EXISTS v_observation_editorial;
 CREATE VIEW v_observation_editorial AS
 WITH base AS (
@@ -716,6 +729,65 @@ normed AS (
         LOWER(TRIM(REPLACE(REPLACE(REPLACE(COALESCE(locality_clean,''), '.', ''), ',', ''), '  ', ' '))) AS locality_norm,
         LOWER(TRIM(REPLACE(REPLACE(REPLACE(COALESCE(socken_clean,''), '.', ''), ',', ''), '  ', ' '))) AS socken_norm
     FROM base
+),
+prepared AS (
+    SELECT
+        *,
+        CASE
+            WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
+            ELSE TRIM(individual_count) || ' ex'
+        END AS count_text,
+
+        CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
+        CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER) AS short_date,
+
+        CASE
+            WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
+            WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
+            ELSE TRIM(reporter)
+        END AS short_reporter,
+
+        CASE
+            WHEN locality_clean IS NOT NULL
+                 AND instr(locality_clean, ',') > 0
+                 AND LOWER(TRIM(substr(locality_clean, 1, instr(locality_clean, ',') - 1)))
+                     = LOWER(TRIM(substr(locality_clean, instr(locality_clean, ',') + 1)))
+            THEN TRIM(substr(locality_clean, 1, instr(locality_clean, ',') - 1))
+
+            WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
+            THEN TRIM(locality_clean)
+
+            ELSE ''
+        END AS locality_display,
+
+        CASE
+            WHEN locality_clean IS NOT NULL
+                 AND instr(locality_clean, ',') > 0
+                 AND LOWER(TRIM(substr(locality_clean, 1, instr(locality_clean, ',') - 1)))
+                     = LOWER(TRIM(substr(locality_clean, instr(locality_clean, ',') + 1)))
+            THEN
+                CASE
+                    WHEN socken_clean IS NOT NULL AND TRIM(socken_clean) <> ''
+                         AND LOWER(TRIM(substr(locality_clean, 1, instr(locality_clean, ',') - 1))) <> LOWER(TRIM(socken_clean))
+                    THEN TRIM(substr(locality_clean, 1, instr(locality_clean, ',') - 1)) || ', ' || TRIM(socken_clean)
+                    ELSE TRIM(substr(locality_clean, 1, instr(locality_clean, ',') - 1))
+                END
+
+            WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
+                 AND socken_clean IS NOT NULL AND TRIM(socken_clean) <> ''
+                 AND locality_norm <> socken_norm
+                 AND instr(locality_norm, socken_norm) = 0
+            THEN TRIM(locality_clean) || ', ' || TRIM(socken_clean)
+
+            WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
+            THEN TRIM(locality_clean)
+
+            WHEN socken_clean IS NOT NULL AND TRIM(socken_clean) <> ''
+            THEN TRIM(socken_clean)
+
+            ELSE ''
+        END AS place_text
+    FROM normed
 )
 SELECT
     obs_id,
@@ -735,57 +807,26 @@ SELECT
     individual_count,
     observed_at,
     verified,
-    CASE
-        WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
-        ELSE TRIM(individual_count) || ' ex'
-    END AS count_text,
-    CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
-    CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER) AS short_date,
-    CASE
-        WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
-        WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
-        ELSE TRIM(reporter)
-    END AS short_reporter,
+    count_text,
+    short_date,
+    short_reporter,
+    locality_display,
+    place_text,
     TRIM(
-    REPLACE(
         REPLACE(
             REPLACE(
                 REPLACE(
                     REPLACE(
                         REPLACE(
                             (
-                                CASE
-                                    WHEN individual_count IS NULL OR TRIM(individual_count) = '' THEN 'noterad'
-                                    ELSE TRIM(individual_count) || ' ex'
-                                END
-                                || ', ' ||
-                                (CAST(strftime('%d', substr(observed_at,1,19)) AS INTEGER) || '/' ||
-                                 CAST(strftime('%m', substr(observed_at,1,19)) AS INTEGER))
-                                || ', ' ||
-                                CASE
-                                    WHEN reporter IS NULL OR TRIM(reporter) = '' THEN '[okänd rapportör]'
-                                    WHEN instr(reporter, ',') > 0 THEN TRIM(substr(reporter, 1, instr(reporter, ',') - 1))
-                                    ELSE TRIM(reporter)
-                                END
+                                count_text
+                                || ', ' || short_date
+                                || ', ' || short_reporter
                                 || CASE
-                                    WHEN locality_clean IS NOT NULL AND TRIM(locality_clean) <> ''
-                                    THEN ', ' || TRIM(locality_clean)
+                                    WHEN place_text <> ''
+                                    THEN ', ' || place_text
                                     ELSE ''
                                    END
-				   || CASE
-    				      WHEN socken_clean IS NOT NULL
-				      	   AND TRIM(socken_clean) <> ''
-				      	   AND (
-				      	       locality_clean IS NULL
-				      	            OR TRIM(locality_clean) = ''
-				      		    OR (
-				      		       LOWER(TRIM(socken_clean)) <> LOWER(TRIM(locality_clean))
-				      		       AND instr(LOWER(TRIM(locality_clean)), LOWER(TRIM(socken_clean))) = 0
-				      		    )
-				           )
-				      	   THEN ', ' || TRIM(socken_clean)
-				      	   ELSE ''
-				      END
                                 || CASE
                                     WHEN source_comment IS NOT NULL
                                      AND TRIM(source_comment) <> ''
@@ -800,16 +841,15 @@ SELECT
                     ),
                     ', .', '.'
                 ),
-                '..', '.'
+                '  ', ' '
             ),
-            '  ', ' '
-        ),
-        ' ,', ','
-    )
+            ' ,', ','
+        )
     ) AS obs_text
 
-FROM normed;
+FROM prepared;
 
+-- #  v_observation_editorial_dedup
 DROP VIEW IF EXISTS v_observation_editorial_dedup;
 CREATE VIEW v_observation_editorial_dedup AS
 WITH base AS (
@@ -830,6 +870,7 @@ SELECT *
 FROM base
 WHERE dup_rn = 1;
 
+-- #  v_ranked_observations
 DROP VIEW IF EXISTS v_ranked_observations;
 CREATE VIEW v_ranked_observations AS
 SELECT
@@ -850,6 +891,7 @@ SELECT
     ) AS rn
 FROM v_observation_editorial_dedup e;
 
+-- #  v_report_observations
 DROP VIEW IF EXISTS v_report_observations;
 CREATE VIEW v_report_observations AS
 SELECT
@@ -863,6 +905,7 @@ ORDER BY
     observed_at;
 
 
+-- #  v_obs_concat
 DROP VIEW IF EXISTS v_obs_concat;
 CREATE VIEW v_obs_concat AS
 SELECT
@@ -881,105 +924,239 @@ GROUP BY taxon_id;
 -- REPORT VIEWS
 -- =========================================================
 
+-- #  v_report_draft
 DROP VIEW IF EXISTS v_report_draft;
+
 CREATE VIEW v_report_draft AS
+WITH base AS (
+    SELECT
+        i.family_name,
+        COALESCE(fsv.family_name_sv, '') AS family_name_sv,
+        i.taxon_sort_order,
+        i.taxon_id,
+        i.scientific_name,
+        COALESCE(ad.author_display, i.author_text) AS author_short,
+        i.common_name,
+        i.red_list_code,
+        i.observation_count,
+        i.municipality_count,
+        i.reason_codes,
+        i.reason_texts,
+        i.top_priority,
+        i.verified_count,
+        oc.obs_texts,
+        ds.first_date,
+        ds.last_date,
+
+	CASE
+		WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0 THEN 1
+    		ELSE 0
+	END AS has_first_in_skane,
+	-- CASE
+        --     WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0
+        --       OR instr(COALESCE(i.reason_codes, ''), 'first_province') > 0
+        --       OR instr(COALESCE(i.reason_texts, ''), 'Första kända fyndet i Skåne') > 0
+        --     THEN 1
+        --     ELSE 0
+        -- END AS has_first_in_skane,
+
+        CASE
+            WHEN i.red_list_code IN ('CR', 'EN', 'VU', 'NT') THEN 1
+            ELSE 0
+        END AS has_redlist,
+
+        CASE
+            WHEN i.observation_count <= 3 THEN 1
+            ELSE 0
+        END AS has_few_observations
+    FROM v_interesting_family_species i
+    LEFT JOIN v_obs_concat oc
+        ON oc.taxon_id = i.taxon_id
+    LEFT JOIN family_names_sv fsv
+        ON fsv.family_name = i.family_name
+    LEFT JOIN v_author_display ad
+        ON ad.taxon_id = i.taxon_id
+    LEFT JOIN v_species_date_span ds
+        ON ds.taxon_id = i.taxon_id
+)
 SELECT
-    i.family_name,
-    COALESCE(fsv.family_name_sv, '') AS family_name_sv,
-    i.taxon_sort_order,
-    i.taxon_id,
-    i.scientific_name,
-    COALESCE(ad.author_display, i.author_text) AS author_short,
-    i.common_name,
-    i.red_list_code,
-    i.observation_count,
-    i.municipality_count,
-    i.reason_codes,
-    i.reason_texts,
-    i.top_priority,
+    family_name,
+    family_name_sv,
+    taxon_sort_order,
+    taxon_id,
+    scientific_name,
+    author_short,
+    common_name,
+    red_list_code,
+    observation_count,
+    municipality_count,
+    reason_codes,
+    reason_texts,
+    top_priority,
+
     CASE
-	WHEN i.observation_count <= 3
-             THEN oc.obs_texts
-    	WHEN i.observation_count <= 5
-             THEN oc.obs_texts
-    	ELSE NULL
+        WHEN observation_count <= 5 THEN obs_texts
+        ELSE NULL
     END AS obs_data,
 
-CASE
-    -- många observationer: ingen obs_data visas
-    WHEN i.observation_count > 5 THEN
-         CAST(i.observation_count AS TEXT) || ' observationer i ' ||
-         CASE
-            WHEN i.municipality_count = 1 THEN '1 kommun'
-            ELSE CAST(i.municipality_count AS TEXT) || ' kommuner'
-         END
-         || CASE
-                WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
+    CASE
+        WHEN observation_count > 5 THEN
+            CAST(observation_count AS TEXT) || ' observationer i ' ||
+            CASE
+                WHEN municipality_count = 1 THEN '1 kommun'
+                ELSE CAST(municipality_count AS TEXT) || ' kommuner'
+            END ||
+            CASE
+                WHEN first_date IS NOT NULL AND last_date IS NOT NULL THEN
                     CASE
-                        WHEN ds.first_date = ds.last_date
-                        THEN ' (' || ds.first_date || ')'
-                        ELSE ' (' || ds.first_date || '–' || ds.last_date || ')'
+                        WHEN first_date = last_date
+                        THEN ' (' || first_date || ')'
+                        ELSE ' (' || first_date || '–' || last_date || ')'
                     END
                 ELSE ''
-            END
-         || '. ' || COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
-
-    -- få observationer: obs_data finns redan → bara reasons
-    WHEN i.observation_count <= 3 THEN
-         COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
-
-    -- 4–5 observationer: obs_data visar några fynd → lägg till datumspann
-    WHEN i.observation_count <= 5 THEN
-         CASE
-            WHEN ds.first_date IS NOT NULL AND ds.last_date IS NOT NULL THEN
-                CASE
-                    WHEN ds.first_date = ds.last_date
-                    THEN '(' || ds.first_date || ')'
-                    ELSE '(' || ds.first_date || '–' || ds.last_date || ')'
-                END
-            ELSE ''
-         END
-         || CASE
-                WHEN COALESCE(i.reason_texts, '') <> ''
-                THEN '. ' || REPLACE(i.reason_texts, ',', ', ')
+            END ||
+            CASE
+                WHEN has_first_in_skane = 1 OR has_redlist = 1 THEN
+                    '. ' ||
+                    TRIM(
+                        CASE
+                            WHEN has_first_in_skane = 1
+                            THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
+                            ELSE ''
+                        END ||
+                        CASE
+                            WHEN has_first_in_skane = 1 AND has_redlist = 1
+                            THEN '. '
+                            ELSE ''
+                        END ||
+                        CASE
+                            WHEN has_redlist = 1
+                            THEN 'Rödlistad art'
+                            ELSE ''
+                        END
+                    )
                 ELSE ''
             END
 
-    ELSE
-         COALESCE(REPLACE(i.reason_texts, ',', ', '), '')
+        WHEN observation_count <= 3 THEN
+            NULLIF(
+                TRIM(
+                    CASE
+                        WHEN has_first_in_skane = 1
+                        THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN has_first_in_skane = 1 AND has_redlist = 1
+                        THEN '. '
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN has_redlist = 1
+                        THEN 'Rödlistad art'
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN (has_first_in_skane = 1 OR has_redlist = 1) AND has_few_observations = 1
+                        THEN '. '
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN has_few_observations = 1
+                        THEN 'Få observationer under året'
+                        ELSE ''
+                    END
+                ),
+                ''
+            )
 
-END AS closing_comment
+        WHEN observation_count <= 5 THEN
+            CASE
+                WHEN first_date IS NOT NULL AND last_date IS NOT NULL THEN
+                    CASE
+                        WHEN first_date = last_date
+                        THEN '(' || first_date || ')'
+                        ELSE '(' || first_date || '–' || last_date || ')'
+                    END
+                ELSE ''
+            END ||
+            CASE
+                WHEN has_first_in_skane = 1 OR has_redlist = 1 THEN
+                    CASE
+                        WHEN first_date IS NOT NULL AND last_date IS NOT NULL
+                        THEN '. '
+                        ELSE ''
+                    END ||
+                    TRIM(
+                        CASE
+                            WHEN has_first_in_skane = 1
+                            THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
+                            ELSE ''
+                        END ||
+                        CASE
+                            WHEN has_first_in_skane = 1 AND has_redlist = 1
+                            THEN '. '
+                            ELSE ''
+                        END ||
+                        CASE
+                            WHEN has_redlist = 1
+                            THEN 'Rödlistad art'
+                            ELSE ''
+                        END
+                    )
+                ELSE ''
+            END
 
-FROM v_interesting_family_species i
-LEFT JOIN v_obs_concat oc
-    ON oc.taxon_id = i.taxon_id
-LEFT JOIN family_names_sv fsv
-    ON fsv.family_name = i.family_name
-LEFT JOIN v_author_display ad
-    ON ad.taxon_id = i.taxon_id
-LEFT JOIN v_species_date_span ds
-    ON ds.taxon_id = i.taxon_id
-    
+        ELSE
+            NULLIF(
+                TRIM(
+                    CASE
+                        WHEN has_first_in_skane = 1
+                        THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN has_first_in_skane = 1 AND has_redlist = 1
+                        THEN '. '
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN has_redlist = 1
+                        THEN 'Rödlistad art'
+                        ELSE ''
+                    END
+                ),
+                ''
+            )
+    END AS closing_comment
+
+FROM base
 GROUP BY
-    i.family_name,
-    fsv.family_name_sv,
-    i.taxon_sort_order,
-    i.taxon_id,
-    i.scientific_name,
-    COALESCE(ad.author_display, i.author_text),
-    i.common_name,
-    i.red_list_code,
-    i.observation_count,
-    i.municipality_count,
-    i.reason_codes,
-    i.reason_texts,
-    i.top_priority,
-    ds.first_date,
-    ds.last_date
+    family_name,
+    family_name_sv,
+    taxon_sort_order,
+    taxon_id,
+    scientific_name,
+    author_short,
+    common_name,
+    red_list_code,
+    observation_count,
+    municipality_count,
+    reason_codes,
+    reason_texts,
+    top_priority,
+    verified_count,
+    obs_texts,
+    first_date,
+    last_date,
+    has_first_in_skane,
+    has_redlist,
+    has_few_observations
 ORDER BY
-    i.taxon_sort_order,
-    i.scientific_name;
+    taxon_sort_order,
+    scientific_name;
 
+-- #  v_report_lines
 DROP VIEW IF EXISTS v_report_lines;
 CREATE VIEW v_report_lines AS
 SELECT
@@ -1018,6 +1195,7 @@ SELECT
     ) AS report_line
 FROM v_report_draft d;
 
+-- #  v_family_headers
 DROP VIEW IF EXISTS v_family_headers;
 CREATE VIEW v_family_headers AS
 SELECT DISTINCT
@@ -1031,6 +1209,7 @@ SELECT DISTINCT
 FROM v_report_lines
 ORDER BY family_name;
 
+-- #  v_report_output
 DROP VIEW IF EXISTS v_report_output;
 CREATE VIEW v_report_output AS
 WITH families AS (
@@ -1092,6 +1271,7 @@ ORDER BY
 
 -- Find out why these are needed!!
 
+-- #  why?
 DROP VIEW IF EXISTS v_suspect_non_lep_families;
 CREATE VIEW v_suspect_non_lep_families AS
 SELECT *
