@@ -1,2 +1,2 @@
 config/settings.env
-src/obsperyear.sqlite
+db/obsperyear.sqlite

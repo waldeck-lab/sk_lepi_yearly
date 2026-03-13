@@ -128,10 +128,13 @@ CREATE INDEX IF NOT EXISTS idx_obs_redlist ON observations(red_list_code);
 CREATE INDEX IF NOT EXISTS idx_obs_verified ON observations(verified);
 CREATE INDEX IF NOT EXISTS idx_obs_taxon_date ON observations(taxon_id, observed_at);
 CREATE INDEX IF NOT EXISTS idx_obs_taxon_verified ON observations(taxon_id, verified);
+CREATE INDEX IF NOT EXISTS idx_obs_taxon_sort_order ON observations(taxon_sort_order);
+CREATE INDEX IF NOT EXISTS idx_obs_year_taxon ON observations(observed_at, taxon_id);
 CREATE INDEX IF NOT EXISTS idx_taxa_family ON taxa(family_name);
 CREATE INDEX IF NOT EXISTS idx_taxa_order ON taxa(order_name);
 CREATE INDEX IF NOT EXISTS idx_taxa_rank ON taxa(taxon_rank);
 CREATE INDEX IF NOT EXISTS idx_taxa_sciname ON taxa(scientific_name);
+
 -- =========================================================
 -- SEED DATA
 -- =========================================================
@@ -260,6 +263,16 @@ CREATE VIEW v_report_year AS
 SELECT CAST(config_value AS INTEGER) AS report_year
 FROM app_config
 WHERE config_key = 'report_year';
+
+
+-- =========================================================
+-- Config table
+-- =========================================================
+CREATE TABLE IF NOT EXISTS config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
 
 

@@ -185,21 +185,23 @@ def fetch_page(skip: int, take: int, payload: dict[str, Any], max_retries: int =
     raise RuntimeError(f"Failed to fetch page after repeated retries at skip={skip}")
 
 def extract_row(rec: dict[str, Any]):
+    global missing_sort_order_cnt
+
     obs_id = get_nested(rec, ["occurrence", "occurrenceId"])
     if not obs_id:
         return None
 
     taxon_attrs = get_nested(rec, ["taxon", "attributes"], {}) or {}
-    # Local helpers:
-    # 1. Remove empty strings and use NULL for better code
-    life_stage = get_nested(rec, ["occurrence", "lifeStage", "value"]) or None 
-    # 2. Get either activty or behaviour if present
-    method = (get_nested(rec, ["occurrence", "activity", "value"])
-              or get_nested(rec, ["occurrence", "behavior", "value"]))
-    # 3. Verify sort-order exists
+    life_stage = get_nested(rec, ["occurrence", "lifeStage", "value"]) or None
+    method = (
+        get_nested(rec, ["occurrence", "activity", "value"])
+        or get_nested(rec, ["occurrence", "behavior", "value"])
+    )
+
     taxon_sort_order = get_nested(rec, ["taxon", "attributes", "sortOrder"])
     if taxon_sort_order is None:
         missing_sort_order_cnt += 1
+
     return (
         str(obs_id),
         get_nested(rec, ["taxon", "id"]),
@@ -209,9 +211,9 @@ def extract_row(rec: dict[str, Any]):
         get_nested(rec, ["taxon", "scientificName"]),
         get_nested(rec, ["taxon", "author"]),
         to_int(get_nested(rec, ["occurrence", "individualCount"])),
-        life_stage, 
+        life_stage,
         get_nested(rec, ["occurrence", "sex", "value"]),
-        method, 
+        method,
         get_nested(rec, ["location", "locality"]),
         get_nested(rec, ["location", "parish", "name"]),
         get_nested(rec, ["occurrence", "recordedBy"]),
