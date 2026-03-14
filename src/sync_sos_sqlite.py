@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+import sys
 
 ROOT_DIR = Path(os.getenv("SKLEPI_ROOT", Path(__file__).resolve().parents[1]))
 DB_PATH = str(Path(os.getenv("SKLEPI_DB_PATH", ROOT_DIR / "db" / "obsperyear.sqlite")))
@@ -17,7 +18,21 @@ YEAR = int(os.getenv("SOS_YEAR", "2025"))
 PROVINCE_FEATURE_ID = os.getenv("SOS_PROVINCE_FEATURE_ID", "1") # 1 - Skåne
 DATA_PROVIDER_ID = int(os.getenv("SOS_DATA_PROVIDER_ID", "1")) # 1 - Artportalen
 TAKE = 1000
-TAXON_ROOT = 3000188  # Lepidoptera
+# TAXON_ROOT = 3000188  # Lepidoptera, does not separate macro/micro
+TAXON_GROUPS = [
+    {
+        "root_id": 6039937,
+        "code": "macro",
+        "sort": 1,
+        "label": "Macro Lepidoptera - Storfjärilar",
+    },
+    {
+        "root_id": 6039938,
+        "code": "micro",
+        "sort": 2,
+        "label": "Micro Lepidoptera - Småfjärilar",
+    },
+]
 SYNC_NAME = f"lepidoptera_province_{PROVINCE_FEATURE_ID}_{YEAR}"
 
 
@@ -44,6 +59,9 @@ INSERT INTO observations (
     obs_id,
     taxon_id,
     taxon_sort_order,
+    lep_group_sort,
+    lep_group_code,
+    lep_group_label,
     red_list_code,
     common_name,
     scientific_name,
@@ -74,10 +92,13 @@ INSERT INTO observations (
     raw_json,
     updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(obs_id) DO UPDATE SET
     taxon_id = excluded.taxon_id,
     taxon_sort_order = excluded.taxon_sort_order,
+    lep_group_sort = excluded.lep_group_sort,
+    lep_group_code = excluded.lep_group_code,
+    lep_group_label = excluded.lep_group_label,
     red_list_code = excluded.red_list_code,
     common_name = excluded.common_name,
     scientific_name = excluded.scientific_name,
@@ -108,6 +129,7 @@ ON CONFLICT(obs_id) DO UPDATE SET
     raw_json = excluded.raw_json,
     updated_at = CURRENT_TIMESTAMP
 """
+
 def month_periods(year: int):
     periods = []
     for month in range(1, 13):
@@ -141,6 +163,43 @@ def to_int(value):
     except:
         return None
 
+def qa_check_non_lepidoptera(conn):
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM observations o
+        JOIN taxa t
+            ON t.scientific_name = o.scientific_name
+        WHERE t.order_name IS NOT NULL
+          AND t.order_name <> 'Lepidoptera'
+    """)
+
+    n = cur.fetchone()[0]
+
+    if n == 0:
+        print("[QA] OK: All matched taxa belong to Lepidoptera")
+    else:
+        print(f"[QA] ERROR: {n} observations matched non-Lepidoptera taxa", file=sys.stderr)
+
+        cur.execute("""
+            SELECT DISTINCT
+                o.scientific_name,
+                t.order_name,
+                t.family_name
+            FROM observations o
+            JOIN taxa t
+                ON t.scientific_name = o.scientific_name
+            WHERE t.order_name IS NOT NULL
+              AND t.order_name <> 'Lepidoptera'
+            LIMIT 20
+        """)
+
+        for row in cur.fetchall():
+            print("   ", row, file=sys.stderr)
+
+        sys.exit(1)
+    
 def fetch_page(skip: int, take: int, payload: dict[str, Any], max_retries: int = 8):
     url = (
         f"{BASE_URL}/Observations/Search"
@@ -185,28 +244,28 @@ def fetch_page(skip: int, take: int, payload: dict[str, Any], max_retries: int =
 
     raise RuntimeError(f"Failed to fetch page after repeated retries at skip={skip}")
 
-def extract_row(rec: dict[str, Any]):
+def extract_row(rec: dict[str, Any], group_meta: dict[str, Any]):
     global missing_sort_order_cnt
 
     obs_id = get_nested(rec, ["occurrence", "occurrenceId"])
     if not obs_id:
         return None
 
-    taxon_attrs = get_nested(rec, ["taxon", "attributes"], {}) or {}
-    life_stage = get_nested(rec, ["occurrence", "lifeStage", "value"]) or None
-    method = (
-        get_nested(rec, ["occurrence", "activity", "value"])
-        or get_nested(rec, ["occurrence", "behavior", "value"])
-    )
-
-    taxon_sort_order = get_nested(rec, ["taxon", "attributes", "sortOrder"])
+    taxon_attrs = get_nested(rec, ["taxon", "attributes"]) or {}
+    taxon_sort_order = taxon_attrs.get("sortOrder")
     if taxon_sort_order is None:
         missing_sort_order_cnt += 1
+
+    life_stage = get_nested(rec, ["occurrence", "lifeStage", "value"])
+    method = get_nested(rec, ["occurrence", "activity", "value"])
 
     return (
         str(obs_id),
         get_nested(rec, ["taxon", "id"]),
         taxon_sort_order,
+        group_meta["sort"],
+        group_meta["code"],
+        group_meta["label"],
         taxon_attrs.get("redlistCategory"),
         get_nested(rec, ["taxon", "vernacularName"]),
         get_nested(rec, ["taxon", "scientificName"]),
@@ -258,10 +317,11 @@ def save_progress(cur: sqlite3.Cursor, skip: int, total_count: int, notes: str):
         (SYNC_NAME, skip, total_count, notes)
     )
 
-def build_payload(start_date: str, end_date: str) -> dict:
+
+def build_payload(start_date: str, end_date: str, taxon_root: int) -> dict:
     return {
         "taxon": {
-            "ids": [TAXON_ROOT],
+            "ids": [taxon_root],
             "includeUnderlyingTaxa": True
         },
         "geographics": {
@@ -313,18 +373,21 @@ def build_payload(start_date: str, end_date: str) -> dict:
             ]
         }
     }
+    
+def make_sync_name(group_meta: dict[str, Any]) -> str:
+    return f"{group_meta['code']}_province_{PROVINCE_FEATURE_ID}_{YEAR}"
 
-def get_resume_state(cur: sqlite3.Cursor):
+
+def get_resume_state(cur: sqlite3.Cursor, sync_name: str):
     cur.execute(
         "SELECT notes FROM sync_state WHERE sync_name = ?",
-        (SYNC_NAME,)
+        (sync_name,)
     )
     row = cur.fetchone()
     if not row or not row[0]:
         return 0, 0
 
     notes = row[0]
-    # format: month_index=3;skip=2000;seen=...
     parts = {}
     for item in notes.split(";"):
         if "=" in item:
@@ -336,7 +399,15 @@ def get_resume_state(cur: sqlite3.Cursor):
     return month_index, skip
 
 
-def save_progress(cur: sqlite3.Cursor, month_index: int, skip: int, total_count: int, seen: int, inserted_or_updated: int):
+def save_progress(
+    cur: sqlite3.Cursor,
+    sync_name: str,
+    month_index: int,
+    skip: int,
+    total_count: int,
+    seen: int,
+    inserted_or_updated: int,
+):
     notes = f"month_index={month_index};skip={skip};seen={seen};inserted_or_updated={inserted_or_updated}"
     cur.execute(
         """
@@ -348,10 +419,9 @@ def save_progress(cur: sqlite3.Cursor, month_index: int, skip: int, total_count:
             last_total_count = excluded.last_total_count,
             notes = excluded.notes
         """,
-        (SYNC_NAME, skip, total_count, notes)
+        (sync_name, skip, total_count, notes)
     )
 
-    
 def main():
     print(f"Starting sync for YEAR={YEAR}, PROVINCE_FEATURE_ID={PROVINCE_FEATURE_ID}, DATA_PROVIDER_ID={DATA_PROVIDER_ID}")
     conn = sqlite3.connect(DB_PATH)
@@ -364,60 +434,79 @@ def main():
         print(f"Could not enable WAL: {e}. Continuing without WAL.")
 
     cur = conn.cursor()
-
-    month_index, resume_skip = get_resume_state(cur)
-    seen = 0
-    inserted_or_updated = 0
-
-    print(f"Starting sync from month_index={month_index}, skip={resume_skip}")
     MONTH_PERIODS = month_periods(YEAR)
-    for mi in range(month_index, len(MONTH_PERIODS)):
-        start_date, end_date = MONTH_PERIODS[mi]
-        payload = build_payload(start_date, end_date)
-        skip = resume_skip if mi == month_index else 0
 
-        print(f"Syncing period {start_date} -> {end_date} from skip={skip}")
+    total_seen = 0
+    total_inserted_or_updated = 0
 
-        while True:
-            data = fetch_page(skip=skip, take=TAKE, payload=payload)
+    for group_meta in TAXON_GROUPS:
+        sync_name = make_sync_name(group_meta)
+        month_index, resume_skip = get_resume_state(cur, sync_name)
+        seen = 0
+        inserted_or_updated = 0
 
-            records = data.get("records", [])
-            total_count = data.get("totalCount", 0)
+        print(
+            f"Starting group {group_meta['code']} "
+            f"(taxon_root={group_meta['root_id']}) "
+            f"from month_index={month_index}, skip={resume_skip}"
+        )
 
-            if not records:
-                print(f"No more records for period {start_date} -> {end_date}")
-                break
+        for mi in range(month_index, len(MONTH_PERIODS)):
+            start_date, end_date = MONTH_PERIODS[mi]
+            payload = build_payload(start_date, end_date, group_meta["root_id"])
+            skip = resume_skip if mi == month_index else 0
 
-            for rec in records:
-                row = extract_row(rec)
-                if row is None:
-                    continue
-                cur.execute(INSERT_SQL, row)
-                inserted_or_updated += 1
-                seen += 1
+            print(
+                f"[{group_meta['code']}] Syncing period {start_date} -> {end_date} "
+                f"from skip={skip}"
+            )
 
-            next_skip = skip + TAKE
-            save_progress(cur, mi, next_skip, total_count, seen, inserted_or_updated)
+            while True:
+                data = fetch_page(skip=skip, take=TAKE, payload=payload)
+
+                records = data.get("records", [])
+                total_count = data.get("totalCount", 0)
+
+                if not records:
+                    print(f"[{group_meta['code']}] No more records for period {start_date} -> {end_date}")
+                    break
+
+                for rec in records:
+                    row = extract_row(rec, group_meta)
+                    if row is None:
+                        continue
+                    cur.execute(INSERT_SQL, row)
+                    inserted_or_updated += 1
+                    seen += 1
+
+                next_skip = skip + TAKE
+                save_progress(cur, sync_name, mi, next_skip, total_count, seen, inserted_or_updated)
+                conn.commit()
+
+                processed = min(next_skip, total_count)
+                print(
+                    f"[{group_meta['code']}] {start_date}..{end_date} | "
+                    f"Processed {processed}/{total_count} | inserted_or_updated={inserted_or_updated}"
+                )
+
+                if processed >= total_count:
+                    break
+
+                skip = next_skip
+                time.sleep(0.5)
+
+            resume_skip = 0
+            save_progress(cur, sync_name, mi + 1, 0, 0, seen, inserted_or_updated)
             conn.commit()
+            qa_check_non_lepidoptera(conn) # Only lepidoptera allowed, exit on fail
 
-            processed = min(next_skip, total_count)
-            print(f"{start_date}..{end_date} | Processed {processed}/{total_count} | inserted_or_updated={inserted_or_updated}")
-
-            if processed >= total_count:
-                break
-
-            skip = next_skip
-            time.sleep(0.5)
-
-        # next month starts from skip 0
-        resume_skip = 0
-        save_progress(cur, mi + 1, 0, 0, seen, inserted_or_updated)
-        conn.commit()
+        total_seen += seen
+        total_inserted_or_updated += inserted_or_updated
 
     conn.close()
-    if (missing_sort_order_cnt > 0): 
+    if missing_sort_order_cnt > 0:
         print(f"(!) Observations without taxon sort order={missing_sort_order_cnt}")
-    print(f"Done. seen={seen}, inserted_or_updated={inserted_or_updated}")
+    print(f"Done. seen={total_seen}, inserted_or_updated={total_inserted_or_updated}")
 
 if __name__ == "__main__":
     main()

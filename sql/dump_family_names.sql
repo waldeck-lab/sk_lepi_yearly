@@ -1,0 +1,29 @@
+.headers on
+.mode tabs
+
+SELECT
+    f.family_name,
+    COALESCE(fsv.family_name_sv, '') AS family_name_sv,
+    CASE
+        WHEN fsv.family_name_sv IS NULL OR TRIM(fsv.family_name_sv) = '' THEN 'MISSING'
+        ELSE ''
+    END AS needs_sv_alias,
+    f.n_taxa_used,
+    f.n_observations_used
+FROM (
+    SELECT
+        COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
+        COUNT(DISTINCT o.taxon_id) AS n_taxa_used,
+        COUNT(*) AS n_observations_used
+    FROM observations o
+    LEFT JOIN taxa t
+        ON t.taxon_id = o.taxon_id
+    LEFT JOIN family_overrides fo
+        ON fo.scientific_name = o.scientific_name
+    GROUP BY
+        COALESCE(t.family_name, fo.family_name, '[okänd familj]')
+) f
+LEFT JOIN family_names_sv fsv
+    ON fsv.family_name = f.family_name
+ORDER BY
+    f.family_name;

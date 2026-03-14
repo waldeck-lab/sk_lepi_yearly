@@ -1,4 +1,9 @@
 -- file: ./sql/schema.sql
+
+-- Viktigt:
+-- observations.taxon_id från SOS matchar inte säkert taxa.taxon_id från Dyntaxa DWCA.
+-- För rapportvyer joinar vi därför taxa på scientific_name. Kan behöva fixas till bättre senare!
+
 PRAGMA foreign_keys = ON;
 BEGIN; 
 -- =========================================================
@@ -9,6 +14,9 @@ CREATE TABLE IF NOT EXISTS observations (
     obs_id TEXT PRIMARY KEY,
     taxon_id INTEGER,
     taxon_sort_order INTEGER,
+    lep_group_sort INTEGER,
+    lep_group_code TEXT,
+    lep_group_label TEXT,
     red_list_code TEXT,
 
     common_name TEXT,
@@ -153,6 +161,8 @@ CREATE INDEX IF NOT EXISTS idx_taxa_parent_taxon_id ON taxa(parent_taxon_id);
 -- Alter tables
 -- =========================================================
 
+-- Use for temporary insertions of new columns
+
 -- =========================================================
 -- SEED DATA
 -- =========================================================
@@ -187,42 +197,45 @@ INSERT OR IGNORE INTO family_overrides (scientific_name, family_name, note) VALU
 ('Zelotherses paleana/unitana', 'Tortricidae', 'osäker art'),
 ('Zygaena viciae/lonicerae', 'Zygaenidae', 'osäker art');
 
+
 INSERT OR IGNORE INTO family_names_sv (family_name, family_name_sv) VALUES
-('Nymphalidae', 'Praktfjärilar'),
-('Psychidae', 'Säckspinnare'),
-('Limacodidae', 'Snigelspinnare'),
-('Bucculatricidae', 'Kronmalar'),
-('Gracillariidae', 'Styltmalar & guldmalar'),
-('Nepticulidae', 'Dvärgmalar'),
-('Ypsolophidae', 'Tandmalar'),
-('Zygaenidae', 'Bastardsvärmare'),
-('Tortricidae', 'Vecklare'),
-('Noctuidae', 'Nattflyn'),
-('Geometridae', 'Mätare'),
-('Crambidae', 'Mott'),
-('Erebidae', 'Björkspinnare & lappmätare'),
-('Depressariidae', 'Plattmalar'),
-('Coleophoridae', 'Säckmalar'),
-('Eriocraniidae', 'Purpurmalar'),
-('Sphingidae', 'Svärmare'),
-('Pieridae', 'Vitfjärilar'),
-('Lycaenidae', 'Blåvingar'),
-('Yponomeutidae', 'Spinnmalar'),
 ('Adelidae', 'Antennmalar'),
-('Heliozelidae', 'Hålmalar'),
-('Incurvariidae', 'Bladskärare'),
-('Prodoxidae', 'Knoppmalar'),
-('Choreutidae', 'Gnidmott'),
+('Alucitidae', 'Mångfliksmott'),
+('Argyresthiidae', 'Hängemalar'),
+('Bucculatricidae', 'Kronmalar'),
+('Choreutidae', 'Gnidmalar'),
+('Coleophoridae', 'Säckmalar'),
+('Crambidae', 'Mott'),
+('Depressariidae', 'Plattmalar'),
 ('Douglasiidae', 'Skäckmalar'),
 ('Epermeniidae', 'Skärmmalar'),
-('Momphidae', 'Dunörtsmalar'),
-('Parametriotidae', 'Brokmalar'),
-('Scythrididae', 'Fältmalar'),
-('Lypusidae', 'Tubmalar'),
-('Argyresthiidae', 'Hängemalar'),
+('Erebidae', 'Björkspinnare & lappmätare'),
+('Eriocraniidae', 'Purpurmalar'),
+('Geometridae', 'Mätare'),
 ('Glyphipterigidae', 'Hakmalar'),
+('Gracillariidae', 'Styltmalar & guldmalar'),
+('Heliozelidae', 'Hålmalar'),
+('Incurvariidae', 'Bladskärare'),
+('Limacodidae', 'Snigelspinnare'),
+('Lycaenidae', 'Blåvingar'),
 ('Lyonetiidae', 'Lansettmalar'),
-('Plutellidae', 'Korsblommalar');
+('Lypusidae', 'Tubmalar'),
+('Momphidae', 'Dunörtsmalar'),
+('Nepticulidae', 'Dvärgmalar'),
+('Noctuidae', 'Nattflyn'),
+('Nymphalidae', 'Praktfjärilar'),
+('Parametriotidae', 'Brokmalar'),
+('Pieridae', 'Vitfjärilar'),
+('Plutellidae', 'Korsblommalar'),
+('Prodoxidae', 'Knoppmalar'),
+('Psychidae', 'Säckspinnare'),
+('Scythrididae', 'Fältmalar'),
+('Sphingidae', 'Svärmare'),
+('Tortricidae', 'Vecklare'),
+('Yponomeutidae', 'Spinnmalar'),
+('Ypsolophidae', 'Tandmalar'),
+('Zygaenidae', 'Bastardsvärmare');
+
 
 INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
 ('Linnaeus', 'L.'),
@@ -293,6 +306,88 @@ CREATE TABLE IF NOT EXISTS config (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- =========================================================
+-- Lepidoptera chapter grouping (Macro / Micro)
+-- =========================================================
+
+-- taxon 6039937 = Storfjärilar / Lepidoptera, macro
+-- taxon 6039938 = Småfjärilar / Lepidoptera, micro
+
+DROP VIEW IF EXISTS v_lep_group_map;
+CREATE VIEW v_lep_group_map AS
+WITH RECURSIVE lineage AS (
+    SELECT
+        t.taxon_id AS start_taxon_id,
+        t.taxon_id AS ancestor_taxon_id,
+        t.parent_taxon_id,
+        0 AS depth
+    FROM taxa t
+
+    UNION ALL
+
+    SELECT
+        l.start_taxon_id,
+        p.taxon_id AS ancestor_taxon_id,
+        p.parent_taxon_id,
+        l.depth + 1
+    FROM lineage l
+    JOIN taxa p
+        ON p.taxon_id = l.parent_taxon_id
+    WHERE l.parent_taxon_id IS NOT NULL
+      AND l.depth < 100
+),
+grouped AS (
+    SELECT
+        start_taxon_id AS taxon_id,
+        MAX(CASE WHEN ancestor_taxon_id = 6039937 THEN 1 ELSE 0 END) AS is_macro,
+        MAX(CASE WHEN ancestor_taxon_id = 6039938 THEN 1 ELSE 0 END) AS is_micro
+    FROM lineage
+    GROUP BY start_taxon_id
+)
+SELECT
+    taxon_id,
+    CASE
+        WHEN is_macro = 1 THEN 1
+        WHEN is_micro = 1 THEN 2
+        ELSE 99
+    END AS lep_group_sort,
+    CASE
+        WHEN is_macro = 1 THEN 'macro'
+        WHEN is_micro = 1 THEN 'micro'
+        ELSE 'other'
+    END AS lep_group_code,
+    CASE
+        WHEN is_macro = 1 THEN 'Macro Lepidoptera - Storfjärilar'
+        WHEN is_micro = 1 THEN 'Micro Lepidoptera - Småfjärilar'
+        ELSE 'Övrigt'
+    END AS lep_group_label
+FROM grouped;
+
+
+-- =========================================================
+-- Lepidopera taxa filter
+-- =========================================================
+
+DROP VIEW IF EXISTS v_taxa_lepidoptera;
+CREATE VIEW v_taxa_lepidoptera AS
+WITH ranked AS (
+    SELECT
+        t.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY t.scientific_name
+            ORDER BY
+                CASE WHEN COALESCE(t.family_name, '') <> '' THEN 0 ELSE 1 END,
+                CASE WHEN COALESCE(t.taxon_rank, '') = 'species' THEN 0 ELSE 1 END,
+                CASE WHEN COALESCE(t.taxonomic_status, '') = 'accepted' THEN 0 ELSE 1 END,
+                t.taxon_id
+        ) AS rn
+    FROM taxa t
+    WHERE t.order_name = 'Lepidoptera'
+      AND COALESCE(t.scientific_name, '') <> ''
+)
+SELECT *
+FROM ranked
+WHERE rn = 1;
 
 
 -- =========================================================
@@ -303,10 +398,17 @@ CREATE TABLE IF NOT EXISTS config (
 DROP VIEW IF EXISTS v_family_sort_order;
 CREATE VIEW v_family_sort_order AS
 SELECT
+    lep_group_sort,
+    lep_group_code,
+    lep_group_label,
     family_name,
     MIN(taxon_sort_order) AS family_sort_order
 FROM v_interesting_family_species
-GROUP BY family_name;
+GROUP BY
+    lep_group_sort,
+    lep_group_code,
+    lep_group_label,
+    family_name;
 
 -- =========================================================
 -- Date spans (for large sets of observations)
@@ -378,8 +480,8 @@ SELECT
     GROUP_CONCAT(DISTINCT o.municipality_name) AS municipalities,
     substr(o.observed_at, 1, 4) AS obs_year
 FROM observations o
-LEFT JOIN taxa t
-    ON t.taxon_id = o.taxon_id
+LEFT JOIN v_taxa_lepidoptera t
+    ON t.scientific_name = o.scientific_name
 JOIN v_report_year y
 WHERE substr(o.observed_at, 1, 4) = CAST(y.report_year AS TEXT)
   AND o.scientific_name NOT LIKE '%/%'
@@ -415,8 +517,8 @@ SELECT
     END AS uncertain_reason,
     substr(o.observed_at, 1, 4) AS obs_year
 FROM observations o
-LEFT JOIN taxa t
-    ON t.taxon_id = o.taxon_id
+LEFT JOIN v_taxa_lepidoptera t
+    ON t.scientific_name = o.scientific_name
 JOIN v_report_year y
 WHERE substr(o.observed_at, 1, 4) = CAST(y.report_year AS TEXT)
   AND (
@@ -452,8 +554,8 @@ SELECT
 FROM v_species_summary s
 JOIN observations o
     ON o.taxon_id = s.taxon_id
-LEFT JOIN taxa t
-    ON t.taxon_id = s.taxon_id
+LEFT JOIN v_taxa_lepidoptera t
+    ON t.scientific_name = s.scientific_name
 LEFT JOIN family_overrides fo
     ON fo.scientific_name = s.scientific_name
 JOIN v_report_year y
@@ -618,6 +720,9 @@ ORDER BY
 DROP VIEW IF EXISTS v_interesting_family_species;
 CREATE VIEW v_interesting_family_species AS
 SELECT
+    COALESCE(MIN(o.lep_group_sort), 99) AS lep_group_sort,
+    COALESCE(MIN(o.lep_group_code), 'other') AS lep_group_code,
+    COALESCE(MIN(o.lep_group_label), 'Övrigt') AS lep_group_label,
     COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
     MIN(o.taxon_sort_order) AS taxon_sort_order,
     i.taxon_id,
@@ -638,8 +743,8 @@ SELECT
 FROM v_interesting_species i
 JOIN observations o
     ON o.taxon_id = i.taxon_id
-LEFT JOIN taxa t
-    ON t.taxon_id = i.taxon_id
+LEFT JOIN v_taxa_lepidoptera t 
+    ON t.scientific_name = i.scientific_name
 LEFT JOIN family_overrides fo
     ON fo.scientific_name = i.scientific_name
 JOIN v_report_year y
@@ -742,8 +847,8 @@ WITH base AS (
         o.observed_at,
         o.verified
     FROM observations o
-    LEFT JOIN taxa t
-        ON t.taxon_id = o.taxon_id
+    LEFT JOIN v_taxa_lepidoptera t
+    	 ON t.scientific_name = o.scientific_name
     LEFT JOIN family_overrides fo
         ON fo.scientific_name = o.scientific_name
     LEFT JOIN family_names_sv fsv
@@ -968,6 +1073,9 @@ DROP VIEW IF EXISTS v_report_draft;
 CREATE VIEW v_report_draft AS
 WITH base AS (
     SELECT
+        i.lep_group_sort,
+        i.lep_group_code,
+        i.lep_group_label,
         i.family_name,
         COALESCE(fsv.family_name_sv, '') AS family_name_sv,
         i.taxon_sort_order,
@@ -986,17 +1094,10 @@ WITH base AS (
         ds.first_date,
         ds.last_date,
 
-	CASE
-		WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0 THEN 1
-    		ELSE 0
-	END AS has_first_in_skane,
-	-- CASE
-        --     WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0
-        --       OR instr(COALESCE(i.reason_codes, ''), 'first_province') > 0
-        --       OR instr(COALESCE(i.reason_texts, ''), 'Första kända fyndet i Skåne') > 0
-        --     THEN 1
-        --     ELSE 0
-        -- END AS has_first_in_skane,
+        CASE
+            WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0 THEN 1
+            ELSE 0
+        END AS has_first_in_skane,
 
         CASE
             WHEN i.red_list_code IN ('CR', 'EN', 'VU', 'NT') THEN 1
@@ -1018,6 +1119,9 @@ WITH base AS (
         ON ds.taxon_id = i.taxon_id
 )
 SELECT
+    lep_group_sort,
+    lep_group_code,
+    lep_group_label,
     family_name,
     family_name_sv,
     taxon_sort_order,
@@ -1170,6 +1274,9 @@ SELECT
 
 FROM base
 GROUP BY
+    lep_group_sort,
+    lep_group_code,
+    lep_group_label,
     family_name,
     family_name_sv,
     taxon_sort_order,
@@ -1191,6 +1298,7 @@ GROUP BY
     has_redlist,
     has_few_observations
 ORDER BY
+    lep_group_sort,
     taxon_sort_order,
     scientific_name;
 
@@ -1198,6 +1306,9 @@ ORDER BY
 DROP VIEW IF EXISTS v_report_lines;
 CREATE VIEW v_report_lines AS
 SELECT
+    d.lep_group_sort,
+    d.lep_group_code,
+    d.lep_group_label,
     d.family_name,
     d.family_name_sv,
     d.taxon_sort_order,
@@ -1237,6 +1348,9 @@ FROM v_report_draft d;
 DROP VIEW IF EXISTS v_family_headers;
 CREATE VIEW v_family_headers AS
 SELECT DISTINCT
+    lep_group_sort,
+    lep_group_code,
+    lep_group_label,
     family_name,
     family_name_sv,
     CASE
@@ -1245,25 +1359,61 @@ SELECT DISTINCT
         ELSE family_name
     END AS family_header
 FROM v_report_lines
-ORDER BY family_name;
+ORDER BY
+    lep_group_sort,
+    family_name;
+
 
 -- #  v_report_output
 DROP VIEW IF EXISTS v_report_output;
 CREATE VIEW v_report_output AS
 WITH families AS (
     SELECT DISTINCT
+        rl.lep_group_sort,
+        rl.lep_group_code,
+        rl.lep_group_label,
         rl.family_name,
         rl.family_name_sv,
         fs.family_sort_order
     FROM v_report_lines rl
     LEFT JOIN v_family_sort_order fs
-        ON fs.family_name = rl.family_name
+        ON fs.lep_group_sort = rl.lep_group_sort
+       AND fs.family_name = rl.family_name
+),
+chapters AS (
+    SELECT DISTINCT
+        lep_group_sort,
+        lep_group_code,
+        lep_group_label
+    FROM families
+    WHERE lep_group_sort IN (1, 2)
+),
+chapter_headers AS (
+    SELECT
+        lep_group_sort,
+        '' AS family_name,
+        -20 AS family_sort_order,
+        0 AS section_sort,
+        0 AS line_sort,
+        lep_group_label AS line
+    FROM chapters
+),
+chapter_spacer AS (
+    SELECT
+        lep_group_sort,
+        '' AS family_name,
+        -19 AS family_sort_order,
+        1 AS section_sort,
+        0 AS line_sort,
+        ' ' AS line
+    FROM chapters
 ),
 family_headers AS (
     SELECT
+        lep_group_sort,
         family_name,
         family_sort_order,
-        0 AS section_sort,
+        10 AS section_sort,
         0 AS line_sort,
         CASE
             WHEN family_name_sv IS NOT NULL AND family_name_sv <> ''
@@ -1272,35 +1422,168 @@ family_headers AS (
         END AS line
     FROM families
 ),
-family_spacer AS (
+family_spacer_before AS (
     SELECT
+        lep_group_sort,
         family_name,
         family_sort_order,
-        1 AS section_sort,
+        11 AS section_sort,
         0 AS line_sort,
         ' ' AS line
     FROM families
 ),
 species_lines AS (
     SELECT
+        rl.lep_group_sort,
         rl.family_name,
         fs.family_sort_order,
-        2 AS section_sort,
+        12 AS section_sort,
         rl.taxon_sort_order AS line_sort,
         rl.report_line AS line
     FROM v_report_lines rl
     LEFT JOIN v_family_sort_order fs
-        ON fs.family_name = rl.family_name
+        ON fs.lep_group_sort = rl.lep_group_sort
+       AND fs.family_name = rl.family_name
+),
+family_spacer_after AS (
+    SELECT
+        lep_group_sort,
+        family_name,
+        family_sort_order,
+        13 AS section_sort,
+        0 AS line_sort,
+        ' ' AS line
+    FROM families
 )
 SELECT line
 FROM (
+    SELECT * FROM chapter_headers
+    UNION ALL
+    SELECT * FROM chapter_spacer
+    UNION ALL
     SELECT * FROM family_headers
     UNION ALL
-    SELECT * FROM family_spacer
+    SELECT * FROM family_spacer_before
     UNION ALL
     SELECT * FROM species_lines
+    UNION ALL
+    SELECT * FROM family_spacer_after
 )
 ORDER BY
+    lep_group_sort,
+    family_sort_order,
+    family_name,
+    section_sort,
+    line_sort,
+    line;
+
+-- #  v_report_output
+DROP VIEW IF EXISTS v_report_output;
+CREATE VIEW v_report_output AS
+WITH families AS (
+    SELECT DISTINCT
+        rl.lep_group_sort,
+        rl.lep_group_code,
+        rl.lep_group_label,
+        rl.family_name,
+        rl.family_name_sv,
+        fs.family_sort_order
+    FROM v_report_lines rl
+    LEFT JOIN v_family_sort_order fs
+        ON fs.lep_group_sort = rl.lep_group_sort
+       AND fs.family_name = rl.family_name
+),
+chapters AS (
+    SELECT DISTINCT
+        lep_group_sort,
+        lep_group_code,
+        lep_group_label
+    FROM families
+    WHERE lep_group_sort IN (1, 2)
+),
+chapter_headers AS (
+    SELECT
+        lep_group_sort,
+        '' AS family_name,
+        -20 AS family_sort_order,
+        0 AS section_sort,
+        0 AS line_sort,
+        lep_group_label AS line
+    FROM chapters
+),
+chapter_spacer AS (
+    SELECT
+        lep_group_sort,
+        '' AS family_name,
+        -19 AS family_sort_order,
+        1 AS section_sort,
+        0 AS line_sort,
+        ' ' AS line
+    FROM chapters
+),
+family_headers AS (
+    SELECT
+        lep_group_sort,
+        family_name,
+        family_sort_order,
+        10 AS section_sort,
+        0 AS line_sort,
+        CASE
+            WHEN family_name_sv IS NOT NULL AND family_name_sv <> ''
+            THEN family_name || ' – ' || family_name_sv
+            ELSE family_name
+        END AS line
+    FROM families
+),
+family_spacer_before AS (
+    SELECT
+        lep_group_sort,
+        family_name,
+        family_sort_order,
+        11 AS section_sort,
+        0 AS line_sort,
+        ' ' AS line
+    FROM families
+),
+species_lines AS (
+    SELECT
+        rl.lep_group_sort,
+        rl.family_name,
+        fs.family_sort_order,
+        12 AS section_sort,
+        rl.taxon_sort_order AS line_sort,
+        rl.report_line AS line
+    FROM v_report_lines rl
+    LEFT JOIN v_family_sort_order fs
+        ON fs.lep_group_sort = rl.lep_group_sort
+       AND fs.family_name = rl.family_name
+),
+family_spacer_after AS (
+    SELECT
+        lep_group_sort,
+        family_name,
+        family_sort_order,
+        13 AS section_sort,
+        0 AS line_sort,
+        ' ' AS line
+    FROM families
+)
+SELECT line
+FROM (
+    SELECT * FROM chapter_headers
+    UNION ALL
+    SELECT * FROM chapter_spacer
+    UNION ALL
+    SELECT * FROM family_headers
+    UNION ALL
+    SELECT * FROM family_spacer_before
+    UNION ALL
+    SELECT * FROM species_lines
+    UNION ALL
+    SELECT * FROM family_spacer_after
+)
+ORDER BY
+    lep_group_sort,
     family_sort_order,
     family_name,
     section_sort,

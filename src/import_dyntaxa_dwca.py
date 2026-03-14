@@ -13,20 +13,32 @@ TAXONOMY_DIR = Path(os.getenv("SKLEPI_TAXONOMY_DIR", ROOT_DIR / "dwca"))
 TAXON_CSV = TAXONOMY_DIR / "Taxon.csv"
 
 
-def lsid_to_int(value):
+def lsid_to_int(value: str | None, require_namespace: str | None = None):
     if not value:
         return None
+
     value = value.strip()
-    if ":" in value:
+
+    if ":" not in value:
         try:
-            return int(value.split(":")[-1])
+            return int(value)
         except ValueError:
             return None
-    try:
-        return int(value)
-    except ValueError:
+
+    parts = value.split(":")
+    if len(parts) < 2:
         return None
 
+    namespace = parts[-2]
+    tail = parts[-1]
+
+    if require_namespace is not None and namespace != require_namespace:
+        return None
+
+    try:
+        return int(tail)
+    except ValueError:
+        return None
 
 def main():
     if not TAXON_CSV.exists():
@@ -94,17 +106,21 @@ def main():
         print("Columns found:")
         print(reader.fieldnames)
 
+        skipped_non_taxon = 0
         for row in reader:
             taxon_lsid = row.get("taxonId")
-            taxon_id = lsid_to_int(taxon_lsid)
+
+            # Importera endast riktiga Dyntaxa Taxon-rader
+            taxon_id = lsid_to_int(taxon_lsid, require_namespace="Taxon")
             if taxon_id is None:
+                skipped_non_taxon += 1
                 continue
 
             values = (
                 taxon_id,
                 taxon_lsid,
-                lsid_to_int(row.get("acceptedNameUsageID")),
-                lsid_to_int(row.get("parentNameUsageID")),
+                lsid_to_int(row.get("acceptedNameUsageID"), require_namespace="Taxon"),
+                lsid_to_int(row.get("parentNameUsageID"), require_namespace="Taxon"),
                 row.get("scientificName"),
                 row.get("scientificNameAuthorship"),
                 None,
@@ -134,7 +150,7 @@ def main():
     conn.commit()
 
     print(f"Imported/updated {inserted} taxa")
-
+    print(f"Skipped non-Taxon rows: {skipped_non_taxon}")
     cur.execute("SELECT COUNT(*) FROM taxa")
     print("Rows now in taxa:", cur.fetchone()[0])
 
