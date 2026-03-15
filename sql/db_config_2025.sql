@@ -7,12 +7,17 @@
 
 -- report_formatted: true = markdown formatting (*species*, **NT**)
 
-INSERT INTO config(key, value)
-VALUES
-    ('report_year', '2025'),
-    ('province_id', '1'),
-    ('report_formatted', 'true')
-ON CONFLICT(key) DO UPDATE
-SET value = excluded.value,
-    updated_at = CURRENT_TIMESTAMP;
-    
+.headers on
+.mode column
+
+UPDATE app_config
+SET config_value = '2025'
+WHERE config_key = 'report_year';
+
+UPDATE app_config
+SET config_value = 'true'
+WHERE config_key = 'report_formatted';
+
+SELECT 'CONFIG: report_year=' || report_year ||
+       ' formatted=' || formatted_output
+FROM v_config_status;
