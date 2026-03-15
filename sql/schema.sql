@@ -286,8 +286,13 @@ CREATE TABLE IF NOT EXISTS app_config (
     config_value TEXT NOT NULL
 );
 
+-- Parameter: Reporting year (format: 4 digit INT)
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('report_year', '2025');
+
+-- Parameter: Formatted output (format: BOOL)
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('report_formatted', 'false');
 
 -- #  v_report_year
 DROP VIEW IF EXISTS v_report_year;
@@ -295,6 +300,35 @@ CREATE VIEW v_report_year AS
 SELECT CAST(config_value AS INTEGER) AS report_year
 FROM app_config
 WHERE config_key = 'report_year';
+
+-- #  v_report_format
+DROP VIEW IF EXISTS v_report_format;
+CREATE VIEW v_report_format AS
+SELECT
+    CASE
+        WHEN LOWER(TRIM(config_value)) IN ('1', 'true', 'yes', 'on')
+        THEN 1
+        ELSE 0
+    END AS report_formatted
+FROM app_config
+WHERE config_key = 'report_formatted';
+
+-- # v_config_status
+DROP VIEW IF EXISTS v_config_status;
+
+CREATE VIEW v_config_status AS
+SELECT
+    MAX(CASE WHEN config_key='report_year'
+        THEN config_value END) AS report_year,
+
+    CASE
+        WHEN LOWER(TRIM(MAX(CASE WHEN config_key='report_formatted'
+            THEN config_value END))) IN ('1','true','yes','on')
+        THEN 'ON'
+        ELSE 'OFF'
+    END AS formatted_output
+
+FROM app_config;
 
 
 -- =========================================================
@@ -1305,6 +1339,10 @@ ORDER BY
 -- #  v_report_lines
 DROP VIEW IF EXISTS v_report_lines;
 CREATE VIEW v_report_lines AS
+WITH fmt AS (
+    SELECT COALESCE(MAX(report_formatted), 0) AS report_formatted
+    FROM v_report_format
+)
 SELECT
     d.lep_group_sort,
     d.lep_group_code,
@@ -1318,21 +1356,36 @@ SELECT
     d.red_list_code,
     d.top_priority,
     TRIM(
-        d.scientific_name
-        || CASE WHEN d.author_short IS NOT NULL AND d.author_short <> '' THEN ' (' || d.author_short || ')' ELSE '' END
+        CASE
+            WHEN (SELECT report_formatted FROM fmt) = 1
+            THEN '*' || d.scientific_name || '*'
+            ELSE d.scientific_name
+        END
         || CASE
-            WHEN d.common_name IS NOT NULL AND d.common_name <> '' THEN ', ' || d.common_name
+            WHEN d.author_short IS NOT NULL AND d.author_short <> ''
+            THEN ' (' || d.author_short || ')'
             ELSE ''
-           END
+        END
         || CASE
-            WHEN d.red_list_code IN ('CR','EN','VU','NT') THEN ', ' || d.red_list_code
+            WHEN d.common_name IS NOT NULL AND d.common_name <> ''
+            THEN ', ' || d.common_name
             ELSE ''
-           END
+        END
+        || CASE
+            WHEN d.red_list_code IN ('CR','EN','VU','NT','DD','RE')
+            THEN ', ' ||
+                 CASE
+                     WHEN (SELECT report_formatted FROM fmt) = 1
+                     THEN '**' || d.red_list_code || '**'
+                     ELSE d.red_list_code
+                 END
+            ELSE ''
+        END
         || ': '
         || CASE
             WHEN d.obs_data IS NOT NULL AND d.obs_data <> '' THEN d.obs_data
             ELSE ''
-           END
+        END
         || CASE
             WHEN d.closing_comment IS NOT NULL AND d.closing_comment <> '' THEN
                 CASE
@@ -1340,7 +1393,7 @@ SELECT
                     ELSE d.closing_comment
                 END
             ELSE ''
-           END
+        END
     ) AS report_line
 FROM v_report_draft d;
 
