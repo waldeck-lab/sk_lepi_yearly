@@ -294,6 +294,12 @@ Output structure
 - family
 - species
 
+The report is suitable for export to Word or LibraOffice
+
+```
+pandoc -f markdown+hard_line_breaks report_YYYYMMDD_HHMMSS.txt -o report.docx
+```
+
 ---
 
 # Acknowledgements
