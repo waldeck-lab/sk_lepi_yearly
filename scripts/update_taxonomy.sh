@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# File: update_taxonomy.sh 
+# File: update_taxonomy.sh
+
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jonas Waldeck
+
 set -e
 
 # Require API key from environment

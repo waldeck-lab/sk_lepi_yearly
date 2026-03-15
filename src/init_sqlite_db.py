@@ -1,4 +1,8 @@
 # File ./src/init_sqlite_db.py
+
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jonas Waldeck
+
 import sqlite3
 import os
 from pathlib import Path

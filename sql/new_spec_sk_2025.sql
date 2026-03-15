@@ -1,6 +1,15 @@
 -- file: ../sql/new_spec_sk_2025.sql
+
+-- file: dump_authors.sql
+
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 Jonas Waldeck
+
 -- Searched 1900-2024, then compared with 1900-2025
 -- add with sqlite3 obsperyear.sqlite < new_spec_sk_2025.sql
+
+-- TODO: Manually updated, to be generated automatically!!
+
 INSERT OR IGNORE INTO species_skane_history
 (taxon_id, scientific_name, first_known_year_in_skane)
 VALUES

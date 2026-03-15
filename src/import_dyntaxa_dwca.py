@@ -1,4 +1,8 @@
 # file: ./src/import_dyntaxa_dwca.py
+
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jonas Waldeck
+
 # Description: Imports/updates last fetched DWCA CSV into the SQLite local DB
 
 import csv

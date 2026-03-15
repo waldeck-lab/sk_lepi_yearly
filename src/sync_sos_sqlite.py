@@ -1,4 +1,8 @@
 # file: ../src/sync_sos_sqlite.py
+
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jonas Waldeck
+
 import json
 import os
 import sqlite3

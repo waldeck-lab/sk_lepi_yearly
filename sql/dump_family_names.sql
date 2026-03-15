@@ -1,3 +1,9 @@
+-- file: dump_family_names.sql
+
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 Jonas Waldeck
+
+
 .headers on
 .mode tabs
 

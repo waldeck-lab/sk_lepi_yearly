@@ -1,3 +1,8 @@
+-- file: non_unique_reports.sql
+
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 Jonas Waldeck
+
 .headers on
 .mode tabs
 

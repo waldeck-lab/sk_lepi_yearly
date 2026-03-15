@@ -1,5 +1,8 @@
 -- file: ./sql/schema.sql
 
+-- SPDX-License-Identifier: MIT
+-- Copyright (c) 2026 Jonas Waldeck
+
 -- Viktigt:
 -- observations.taxon_id från SOS matchar inte säkert taxa.taxon_id från Dyntaxa DWCA.
 -- För rapportvyer joinar vi därför taxa på scientific_name. Kan behöva fixas till bättre senare!

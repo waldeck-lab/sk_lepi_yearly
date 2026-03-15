@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jonas Waldeck
+
 set -Eeuo pipefail
 
 SKLEPI_ROOT=$(git rev-parse --show-toplevel)
