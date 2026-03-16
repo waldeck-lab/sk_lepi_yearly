@@ -270,30 +270,70 @@ INSERT OR IGNORE INTO family_names_sv (family_name, family_name_sv) VALUES
 ('Tineidae', 'Klädesmalar'),
 ('Tischeriidae', 'Trädminerarmalar');
 
-
 INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
-('Linnaeus', 'L.'),
-('Linnaé', 'L.'),
-('Fabricius', 'F.'),
-('Haworth', 'Haw.'),
-('Hübner', 'Hb.'),
-('Hubner', 'Hb.'),
-('Stainton', 'Stt.'),
-('Zeller', 'Zell.'),
-('Treitschke', 'Tr.'),
-('Esper', 'Esp.'),
-('Denis & Schiffermüller', 'D&S'),
-('Denis & Schiffenmüller', 'D&S'),
-('Denis & Schiffenmuller', 'D&S'),
-('Scheven', 'Sch.'),
-('Wallengren', 'Wall.'),
-('Ochsenheimer', 'Ochs.'),
-('Duponchel', 'Dup.'),
-('Clerck', 'Cl.'),
-('Scopoli', 'Scop.'),
-('Freyer', 'Fr.'),
-('Müller', 'Müll.'),
-('Röber', 'Röb.');
+('Allen', 'All.'),
+('Amsel', 'Ams.'),
+('Barrett', 'Barr.'),
+('Barret', 'Barr.'),
+('Bastelberger', 'Bast.'),
+('Benander', 'Ben.'),
+('Bengtsson', 'Bengt.'),
+('Berggren', 'Berggr.'),
+('Billberg', 'Billb.'),
+('Bjerkander', 'Bjerk.'),
+('Boisduval', 'Boisd.'),
+('Borkhausen', 'Bkh.'),
+('Bosc', 'Bosc'),
+('Bouché', 'Bouch.'),
+('Boursin', 'Bours.'),
+('Brahm', 'Brahm'),
+('Bremer', 'Brem.'),
+('Bruand', 'Bru.'),
+('Butler', 'Butl.'),
+('Christoph', 'Chr.'),
+('Clemens', 'Clem.'),
+('Curtis', 'Curt.'),
+('Dale', 'Dale'),
+('Dalman', 'Dalm.'),
+('De Geer', 'DeGeer'),
+('De Lattin', 'Latt.'),
+('Deschka & Dimić', 'Deschka & Dim.'),
+('Djakonov', 'Djak.'),
+('Doets', 'Doets'),
+('Donovan', 'Don.'),
+('Donzel', 'Donz.'),
+('Doubleday', 'Dbl.'),
+('Douglas', 'Dougl.'),
+('Durrant', 'Durr.'),
+('E.Hering', 'Her.'),
+('Elisha', 'Elisha'),
+('Eversmann', 'Eversm.'),
+('Falck', 'Falck'),
+('Fenn', 'Fenn'),
+('Fletcher', 'Fletch.'),
+('Fologne', 'Folog.'),
+('Forster', 'Forst.'),
+('Fourcroy', 'Fourcr.'),
+('Frey', 'Frey'),
+('Frölich', 'Fröl.'),
+('Fuchs', 'Fuchs'),
+('Fuessly', 'Fuessl.'),
+('Geoffroy', 'Geoff.'),
+('Gerasimov', 'Geras.'),
+('Germar', 'Germ.'),
+('Geyer', 'Gey.'),
+('Glitz', 'Glitz'),
+('Goeze', 'Goeze'),
+('Gozmany', 'Gozm.'),
+('Gregersen & Karsholt', 'Greg. & Karsh.'),
+('Gregor & Povolný', 'Gregor & Povol.'),
+('Grote', 'Grote'),
+('Guenée', 'Guen.'),
+('Hampson', 'Hamps.'),
+('Fischer von Röslerstamm', 'F.v.R.'),
+('F. v Röslerstam', 'F.v.R.'),
+('F.v Röslerstam', 'F.v.R.');
+
 
 -- Dessa skall infogas manuellt via separat fil
 -- INSERT OR IGNORE INTO species_skane_history
@@ -527,6 +567,20 @@ SELECT *
 FROM ranked
 WHERE rn = 1;
 
+
+-- =========================================================
+-- Author abbreviation report view 
+-- =========================================================
+
+DROP VIEW IF EXISTS v_author_abbrev_report;
+
+CREATE VIEW v_author_abbrev_report AS
+SELECT
+    author_short AS abbrev,
+    REPLACE(GROUP_CONCAT(DISTINCT author_full), ',', ' / ') AS author_full_names
+FROM author_abbrev
+GROUP BY author_short
+ORDER BY author_short;
 
 -- =========================================================
 -- Sorting views
