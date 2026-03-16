@@ -336,6 +336,10 @@ VALUES ('verbose_output', 'false');
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('few_observations_threshold', '3');
 
+-- Parameter: Merge family headers by shared Swedish alias (format: BOOL)
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('merge_family_headers_by_sv_alias', 'true');
+
 -- #  v_report_year
 DROP VIEW IF EXISTS v_report_year;
 CREATE VIEW v_report_year AS
@@ -354,6 +358,39 @@ SELECT
     END AS report_formatted
 FROM app_config
 WHERE config_key = 'report_formatted';
+
+-- #  v_verbose_output
+DROP VIEW IF EXISTS v_verbose_output;
+CREATE VIEW v_verbose_output AS
+SELECT
+    CASE
+        WHEN LOWER(TRIM(config_value)) IN ('1', 'true', 'yes', 'on')
+        THEN 1
+        ELSE 0
+    END AS verbose_output
+FROM app_config
+WHERE config_key = 'verbose_output';
+
+
+-- # v_few_obs_threshold
+DROP VIEW IF EXISTS v_few_obs_threshold;
+CREATE VIEW v_few_obs_threshold AS
+SELECT
+    CAST(config_value AS INTEGER) AS few_obs_threshold
+FROM app_config
+WHERE config_key = 'few_observations_threshold';
+
+-- #  v_merge_family_headers
+DROP VIEW IF EXISTS v_merge_family_headers;
+CREATE VIEW v_merge_family_headers AS
+SELECT
+    CASE
+        WHEN LOWER(TRIM(config_value)) IN ('1', 'true', 'yes', 'on')
+        THEN 1
+        ELSE 0
+    END AS merge_family_headers
+FROM app_config
+WHERE config_key = 'merge_family_headers_by_sv_alias';
 
 
 -- # v_config_status
@@ -384,30 +421,19 @@ SELECT
     MAX(CASE
         WHEN config_key = 'few_observations_threshold'
         THEN config_value
-    END) AS few_obs_threshold
+    END) AS few_obs_threshold,
+
+    CASE
+        WHEN LOWER(TRIM(MAX(CASE
+            WHEN config_key = 'merge_family_headers_by_sv_alias' THEN config_value
+        END))) IN ('1','true','yes','on')
+        THEN 'ON'
+        ELSE 'OFF'
+    END AS merge_family_headers
 
 FROM app_config;
 
--- #  v_verbose_output
-DROP VIEW IF EXISTS v_verbose_output;
-CREATE VIEW v_verbose_output AS
-SELECT
-    CASE
-        WHEN LOWER(TRIM(config_value)) IN ('1', 'true', 'yes', 'on')
-        THEN 1
-        ELSE 0
-    END AS verbose_output
-FROM app_config
-WHERE config_key = 'verbose_output';
 
-
--- # v_few_obs_threshold
-DROP VIEW IF EXISTS v_few_obs_threshold;
-CREATE VIEW v_few_obs_threshold AS
-SELECT
-    CAST(config_value AS INTEGER) AS few_obs_threshold
-FROM app_config
-WHERE config_key = 'few_observations_threshold';
 
 -- =========================================================
 -- Config table
@@ -1491,27 +1517,91 @@ FROM v_report_draft d;
 -- #  v_family_headers
 DROP VIEW IF EXISTS v_family_headers;
 CREATE VIEW v_family_headers AS
-SELECT DISTINCT
-    lep_group_sort,
-    lep_group_code,
-    lep_group_label,
-    family_name,
-    family_name_sv,
+WITH merge_cfg AS (
+    SELECT COALESCE(MAX(merge_family_headers), 0) AS merge_family_headers
+    FROM v_merge_family_headers
+),
+families AS (
+    SELECT DISTINCT
+        rl.lep_group_sort,
+        rl.lep_group_code,
+        rl.lep_group_label,
+        rl.family_name,
+        rl.family_name_sv,
+        fs.family_sort_order
+    FROM v_report_lines rl
+    LEFT JOIN v_family_sort_order fs
+        ON fs.lep_group_sort = rl.lep_group_sort
+       AND fs.family_name = rl.family_name
+),
+family_header_map AS (
+    SELECT
+        f.lep_group_sort,
+        f.lep_group_code,
+        f.lep_group_label,
+        f.family_name,
+        f.family_name_sv,
+        f.family_sort_order,
+        CASE
+            WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+                 AND COALESCE(TRIM(f.family_name_sv), '') <> ''
+            THEN f.family_name_sv
+            ELSE '__NO_MERGE__:' || f.family_name
+        END AS header_group_key
+    FROM families f
+),
+header_groups AS (
+    SELECT
+        lep_group_sort,
+        lep_group_code,
+        lep_group_label,
+        header_group_key,
+        MAX(COALESCE(family_name_sv, '')) AS family_name_sv,
+        MIN(family_sort_order) AS header_sort_order
+    FROM family_header_map
+    GROUP BY
+        lep_group_sort,
+        lep_group_code,
+        lep_group_label,
+        header_group_key
+)
+SELECT
+    hg.lep_group_sort,
+    hg.lep_group_code,
+    hg.lep_group_label,
+    hg.header_group_key,
+    hg.header_sort_order,
     CASE
-        WHEN family_name_sv IS NOT NULL AND family_name_sv <> ''
-        THEN family_name || ' - ' || family_name_sv
-        ELSE family_name
+        WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+             AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
+        THEN
+            (
+                SELECT GROUP_CONCAT(x.family_name, ', ')
+                FROM (
+                    SELECT f2.family_name
+                    FROM family_header_map f2
+                    WHERE f2.lep_group_sort = hg.lep_group_sort
+                      AND f2.header_group_key = hg.header_group_key
+                    ORDER BY f2.family_sort_order, f2.family_name
+                ) x
+            ) || ' - ' || hg.family_name_sv
+        ELSE
+            REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
     END AS family_header
-FROM v_report_lines
+FROM header_groups hg
 ORDER BY
-    lep_group_sort,
-    family_name;
-
+    hg.lep_group_sort,
+    hg.header_sort_order,
+    hg.header_group_key;
 
 -- #  v_report_output
 DROP VIEW IF EXISTS v_report_output;
 CREATE VIEW v_report_output AS
-WITH families AS (
+WITH merge_cfg AS (
+    SELECT COALESCE(MAX(merge_family_headers), 0) AS merge_family_headers
+    FROM v_merge_family_headers
+),
+families AS (
     SELECT DISTINCT
         rl.lep_group_sort,
         rl.lep_group_code,
@@ -1523,6 +1613,37 @@ WITH families AS (
     LEFT JOIN v_family_sort_order fs
         ON fs.lep_group_sort = rl.lep_group_sort
        AND fs.family_name = rl.family_name
+),
+family_header_map AS (
+    SELECT
+        f.lep_group_sort,
+        f.lep_group_code,
+        f.lep_group_label,
+        f.family_name,
+        f.family_name_sv,
+        f.family_sort_order,
+        CASE
+            WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+                 AND COALESCE(TRIM(f.family_name_sv), '') <> ''
+            THEN f.family_name_sv
+            ELSE '__NO_MERGE__:' || f.family_name
+        END AS header_group_key
+    FROM families f
+),
+header_groups AS (
+    SELECT
+        lep_group_sort,
+        lep_group_code,
+        lep_group_label,
+        header_group_key,
+        MAX(COALESCE(family_name_sv, '')) AS family_name_sv,
+        MIN(family_sort_order) AS header_sort_order
+    FROM family_header_map
+    GROUP BY
+        lep_group_sort,
+        lep_group_code,
+        lep_group_label,
+        header_group_key
 ),
 chapters AS (
     SELECT DISTINCT
@@ -1536,7 +1657,8 @@ chapter_headers AS (
     SELECT
         lep_group_sort,
         '' AS family_name,
-        -20 AS family_sort_order,
+        '' AS header_group_key,
+        -20 AS header_sort_order,
         0 AS section_sort,
         0 AS line_sort,
         lep_group_label AS line
@@ -1546,7 +1668,8 @@ chapter_spacer AS (
     SELECT
         lep_group_sort,
         '' AS family_name,
-        -19 AS family_sort_order,
+        '' AS header_group_key,
+        -19 AS header_sort_order,
         1 AS section_sort,
         0 AS line_sort,
         ' ' AS line
@@ -1554,50 +1677,69 @@ chapter_spacer AS (
 ),
 family_headers AS (
     SELECT
-        lep_group_sort,
-        family_name,
-        family_sort_order,
+        hg.lep_group_sort,
+        '' AS family_name,
+        hg.header_group_key,
+        hg.header_sort_order,
         10 AS section_sort,
         0 AS line_sort,
         CASE
-            WHEN family_name_sv IS NOT NULL AND family_name_sv <> ''
-            THEN family_name || ' – ' || family_name_sv
-            ELSE family_name
+            WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+                 AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
+            THEN
+                (
+                    SELECT GROUP_CONCAT(x.family_name, ', ')
+                    FROM (
+                        SELECT f2.family_name
+                        FROM family_header_map f2
+                        WHERE f2.lep_group_sort = hg.lep_group_sort
+                          AND f2.header_group_key = hg.header_group_key
+                        ORDER BY f2.family_sort_order, f2.family_name
+                    ) x
+                ) || ' - ' || hg.family_name_sv
+            ELSE
+                REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
         END AS line
-    FROM families
+    FROM header_groups hg
 ),
 family_spacer_before AS (
     SELECT
-        lep_group_sort,
-        family_name,
-        family_sort_order,
+        hg.lep_group_sort,
+        '' AS family_name,
+        hg.header_group_key,
+        hg.header_sort_order,
         11 AS section_sort,
         0 AS line_sort,
         ' ' AS line
-    FROM families
+    FROM header_groups hg
 ),
 species_lines AS (
     SELECT
         rl.lep_group_sort,
         rl.family_name,
-        fs.family_sort_order,
+        fm.header_group_key,
+        hg.header_sort_order,
         12 AS section_sort,
         rl.taxon_sort_order AS line_sort,
         rl.report_line AS line
     FROM v_report_lines rl
-    LEFT JOIN v_family_sort_order fs
-        ON fs.lep_group_sort = rl.lep_group_sort
-       AND fs.family_name = rl.family_name
+    JOIN family_header_map fm
+        ON fm.lep_group_sort = rl.lep_group_sort
+       AND fm.family_name = rl.family_name
+    JOIN header_groups hg
+        ON hg.lep_group_sort = fm.lep_group_sort
+       AND hg.header_group_key = fm.header_group_key
 ),
 family_spacer_after AS (
     SELECT
-        lep_group_sort,
-        family_name,
-        family_sort_order,
+        hg.lep_group_sort,
+        '' AS family_name,
+        hg.header_group_key,
+        hg.header_sort_order,
         13 AS section_sort,
         0 AS line_sort,
         ' ' AS line
-    FROM families
+    FROM header_groups hg
 )
 SELECT line
 FROM (
@@ -1615,137 +1757,12 @@ FROM (
 )
 ORDER BY
     lep_group_sort,
-    family_sort_order,
-    family_name,
+    header_sort_order,
+    header_group_key,
     section_sort,
     line_sort,
     line;
 
--- #  v_report_output
-DROP VIEW IF EXISTS v_report_output;
-CREATE VIEW v_report_output AS
-WITH families AS (
-    SELECT DISTINCT
-        rl.lep_group_sort,
-        rl.lep_group_code,
-        rl.lep_group_label,
-        rl.family_name,
-        rl.family_name_sv,
-        fs.family_sort_order
-    FROM v_report_lines rl
-    LEFT JOIN v_family_sort_order fs
-        ON fs.lep_group_sort = rl.lep_group_sort
-       AND fs.family_name = rl.family_name
-),
-chapters AS (
-    SELECT DISTINCT
-        lep_group_sort,
-        lep_group_code,
-        lep_group_label
-    FROM families
-    WHERE lep_group_sort IN (1, 2)
-),
-chapter_headers AS (
-    SELECT
-        lep_group_sort,
-        '' AS family_name,
-        -20 AS family_sort_order,
-        0 AS section_sort,
-        0 AS line_sort,
-        lep_group_label AS line
-    FROM chapters
-),
-chapter_spacer AS (
-    SELECT
-        lep_group_sort,
-        '' AS family_name,
-        -19 AS family_sort_order,
-        1 AS section_sort,
-        0 AS line_sort,
-        ' ' AS line
-    FROM chapters
-),
-family_headers AS (
-    SELECT
-        lep_group_sort,
-        family_name,
-        family_sort_order,
-        10 AS section_sort,
-        0 AS line_sort,
-        CASE
-            WHEN family_name_sv IS NOT NULL AND family_name_sv <> ''
-            THEN family_name || ' – ' || family_name_sv
-            ELSE family_name
-        END AS line
-    FROM families
-),
-family_spacer_before AS (
-    SELECT
-        lep_group_sort,
-        family_name,
-        family_sort_order,
-        11 AS section_sort,
-        0 AS line_sort,
-        ' ' AS line
-    FROM families
-),
-species_lines AS (
-    SELECT
-        rl.lep_group_sort,
-        rl.family_name,
-        fs.family_sort_order,
-        12 AS section_sort,
-        rl.taxon_sort_order AS line_sort,
-        rl.report_line AS line
-    FROM v_report_lines rl
-    LEFT JOIN v_family_sort_order fs
-        ON fs.lep_group_sort = rl.lep_group_sort
-       AND fs.family_name = rl.family_name
-),
-family_spacer_after AS (
-    SELECT
-        lep_group_sort,
-        family_name,
-        family_sort_order,
-        13 AS section_sort,
-        0 AS line_sort,
-        ' ' AS line
-    FROM families
-)
-SELECT line
-FROM (
-    SELECT * FROM chapter_headers
-    UNION ALL
-    SELECT * FROM chapter_spacer
-    UNION ALL
-    SELECT * FROM family_headers
-    UNION ALL
-    SELECT * FROM family_spacer_before
-    UNION ALL
-    SELECT * FROM species_lines
-    UNION ALL
-    SELECT * FROM family_spacer_after
-)
-ORDER BY
-    lep_group_sort,
-    family_sort_order,
-    family_name,
-    section_sort,
-    line_sort,
-    line;
-
--- Find out why these are needed!!
-
--- #  why?
-DROP VIEW IF EXISTS v_suspect_non_lep_families;
-CREATE VIEW v_suspect_non_lep_families AS
-SELECT *
-FROM v_family_species_summary
-WHERE family_name IN (
-    'Anthicidae',
-    'Hyaloscyphaceae',
-    'Ectinosomatidae'
-);
-
+-- end of views & tables
 
 COMMIT;
