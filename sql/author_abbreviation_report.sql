@@ -4,7 +4,6 @@
 -- Copyright (c) 2026 Jonas Waldeck
 
 .headers on
-.mode column
-
+.mode tabs
 
 SELECT * FROM v_author_abbrev_report;

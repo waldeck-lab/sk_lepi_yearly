@@ -275,6 +275,7 @@ INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
 ('Linnaé', 'L.'),
 ('Fabricius', 'F.'),
 ('Haworth', 'Haw.'),
+('Herrich-Schäffer', 'H-S'),
 ('Hübner', 'Hb.'),
 ('Hubner', 'Hb.'),
 ('Stainton', 'Stt.'),
@@ -347,32 +348,25 @@ INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
 ('Glitz', 'Glitz'),
 ('Goeze', 'Goeze'),
 ('Gozmany', 'Gozm.'),
-('Gregersen & Karsholt', 'Greg. & Karsh.'),
-('Gregor & Povolný', 'Gregor & Povol.'),
+('Gregersen & Karsholt', 'G&K'),
+('Gregor & Povolný', 'G&P'),
 ('Grote', 'Grote'),
 ('Guenée', 'Guen.'),
 ('Hampson', 'Hamps.'),
 ('Fischer von Röslerstamm', 'F.v.R.'),
 ('F. v Röslerstam', 'F.v.R.'),
-('F.v Röslerstam', 'F.v.R.');
-
-
--- Dessa skall infogas manuellt via separat fil
--- INSERT OR IGNORE INTO species_skane_history
--- (taxon_id, scientific_name, first_known_year_in_skane, note)
--- VALUES
--- (6010429, 'Agrochola lunosa', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (214165, 'Argyresthia ivella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (6332812, 'Caloptilia honoratella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (216027, 'Chloantha hyperici', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (100636, 'Chrysoclista lathamella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (214458, 'Coleophora juncicolella', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (6011700, 'Diplopseustis perieresalis', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (6332811, 'Epiblema turbidana', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (216289, 'Euxoa ochrogaster', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025'),
--- (214233, 'Lyonetia ledi', 2025, 'Ny i jämförelse 1900-2024 vs 1900-2025');
-
-
+('F.v Röslerstam', 'F.v.R.'),
+('Heinemann','Hein.'),
+('Hufnagel','Huf.'),
+('Lienig & Zeller','L&Z'),
+('Metcalfe','Met.'),
+('Oberthür','Ober.'),
+('Schläger','Schl.'),
+('Sodoffsky','Sod.'),
+('Thunberg','Thun.'),
+('Walsingham','Wals.'),
+('de Villers','Vill.'),
+('von Heyden','Heyd.');
 
 -- =========================================================
 -- App parameter (year) 
@@ -589,20 +583,42 @@ SELECT *
 FROM ranked
 WHERE rn = 1;
 
-
 -- =========================================================
 -- Author abbreviation report view 
+-- Only authors used in current report output
 -- =========================================================
 
 DROP VIEW IF EXISTS v_author_abbrev_report;
 
 CREATE VIEW v_author_abbrev_report AS
+WITH report_authors AS (
+    SELECT DISTINCT
+        d.scientific_name
+    FROM v_report_draft d
+),
+author_rows AS (
+    SELECT DISTINCT
+        ad.author_display AS abbrev,
+        ad.author_normalized AS author_full
+    FROM v_author_display ad
+    JOIN report_authors r
+        ON r.scientific_name = ad.scientific_name
+    WHERE COALESCE(TRIM(ad.author_display), '') <> ''
+      AND COALESCE(TRIM(ad.author_normalized), '') <> ''
+),
+author_rows_sorted AS (
+    SELECT
+        abbrev,
+        author_full
+    FROM author_rows
+    ORDER BY abbrev, author_full
+)
 SELECT
-    author_short AS abbrev,
-    REPLACE(GROUP_CONCAT(DISTINCT author_full), ',', ' / ') AS author_full_names
-FROM author_abbrev
-GROUP BY author_short
-ORDER BY author_short;
+    abbrev,
+    REPLACE(GROUP_CONCAT(author_full), ',', ' / ') AS author_full_names
+FROM author_rows_sorted
+GROUP BY abbrev
+ORDER BY abbrev;
 
 -- =========================================================
 -- Sorting views
