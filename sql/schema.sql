@@ -271,6 +271,28 @@ INSERT OR IGNORE INTO family_names_sv (family_name, family_name_sv) VALUES
 ('Tischeriidae', 'Trädminerarmalar');
 
 INSERT OR IGNORE INTO author_abbrev (author_full, author_short) VALUES
+('Linnaeus', 'L.'),
+('Linnaé', 'L.'),
+('Fabricius', 'F.'),
+('Haworth', 'Haw.'),
+('Hübner', 'Hb.'),
+('Hubner', 'Hb.'),
+('Stainton', 'Stt.'),
+('Zeller', 'Zell.'),
+('Treitschke', 'Tr.'),
+('Esper', 'Esp.'),
+('Denis & Schiffermüller', 'D&S'),
+('Denis & Schiffenmüller', 'D&S'),
+('Denis & Schiffenmuller', 'D&S'),
+('Scheven', 'Sch.'),
+('Wallengren', 'Wall.'),
+('Ochsenheimer', 'Ochs.'),
+('Duponchel', 'Dup.'),
+('Clerck', 'Cl.'),
+('Scopoli', 'Scop.'),
+('Freyer', 'Fr.'),
+('Müller', 'Müll.'),
+('Röber', 'Röb.'),
 ('Allen', 'All.'),
 ('Amsel', 'Ams.'),
 ('Barrett', 'Barr.'),
@@ -810,7 +832,7 @@ SELECT
     s.last_obs,
     s.municipalities,
     'first_in_skane' AS reason_code,
-    'Första kända fyndet i Skåne infaller under valt rapportår' AS reason_text,
+    'Första Artportalen notering för Skåne.' AS reason_text,
     10 AS priority
 FROM v_species_summary s
 JOIN species_skane_history h

@@ -59,3 +59,9 @@ sqlite3 "${SKLEPI_DB_PATH}" < "${REPORT_SQL}" > "${REPORT_FILE}"
 
 echo "[OK] report: ${REPORT_FILE}"
 echo "[OK] finished: $(date -Iseconds)"
+
+echo "The report is suitable for export to Word or LibraOffice"
+echo "Run:"
+echo "pandoc -f markdown+hard_line_breaks ${REPORT_FILE} -o ${REPORT_FILE}.docx"
+
+
