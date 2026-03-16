@@ -18,7 +18,7 @@ ROOT_DIR = Path(os.getenv("SKLEPI_ROOT", Path(__file__).resolve().parents[1]))
 DB_PATH = str(Path(os.getenv("SKLEPI_DB_PATH", ROOT_DIR / "db" / "obsperyear.sqlite")))
 BASE_URL = "https://api.artdatabanken.se/species-observation-system/v1"
 
-YEAR = int(os.getenv("SOS_YEAR", "2025"))
+YEAR = int(os.getenv("YEAR", "2025"))
 PROVINCE_FEATURE_ID = os.getenv("SOS_PROVINCE_FEATURE_ID", "1") # 1 - Skåne
 DATA_PROVIDER_ID = int(os.getenv("SOS_DATA_PROVIDER_ID", "1")) # 1 - Artportalen
 TAKE = 1000

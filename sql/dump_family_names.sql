@@ -3,7 +3,6 @@
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
 
-
 .headers on
 .mode tabs
 
@@ -19,13 +18,17 @@ SELECT
 FROM (
     SELECT
         COALESCE(t.family_name, fo.family_name, '[okänd familj]') AS family_name,
-        COUNT(DISTINCT o.taxon_id) AS n_taxa_used,
+        COUNT(DISTINCT o.scientific_name) AS n_taxa_used,
         COUNT(*) AS n_observations_used
     FROM observations o
-    LEFT JOIN taxa t
-        ON t.taxon_id = o.taxon_id
+    LEFT JOIN v_taxa_lepidoptera t
+        ON t.scientific_name = o.scientific_name
     LEFT JOIN family_overrides fo
         ON fo.scientific_name = o.scientific_name
+    WHERE
+        o.scientific_name NOT LIKE '%/%'
+        AND COALESCE(t.taxon_rank, '') = 'species'
+        AND COALESCE(t.family_name, fo.family_name, '') <> ''
     GROUP BY
         COALESCE(t.family_name, fo.family_name, '[okänd familj]')
 ) f

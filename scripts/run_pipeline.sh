@@ -8,11 +8,12 @@ set -Eeuo pipefail
 SKLEPI_ROOT=$(git rev-parse --show-toplevel)
 source "${SKLEPI_ROOT}/config/common.env"
 
-# Helpers
-DB_CONFIG_SQL="${1:-${SKLEPI_SQL_DIR}/db_config_2025.sql}"
+# Helpers, 
+DB_CONFIG_SQL="${1:-${SKLEPI_SQL_DIR}/${YEAR}/db_config.sql}"
 VIEW_CONFIG_SQL="${2:-${SKLEPI_SQL_DIR}/view_config_status.sql}"
-NEW_YEARLY_SPECIES="${3:-${SKLEPI_SQL_DIR}/new_spec_sk_2025.sql}"
-REPORT_SQL="${4:-${SKLEPI_SQL_DIR}/editorial_report.sql}"
+NEW_YEARLY_SPECIES="${3:-${SKLEPI_SQL_DIR}/${YEAR}/new_spec_sk.sql}"
+MANUAL_INSERTED_SPECIES="${4:-${SKLEPI_SQL_DIR}/${YEAR}/manual_insert.sql}"
+REPORT_SQL="${5:-${SKLEPI_SQL_DIR}/editorial_report.sql}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 LOG_FILE="${SKLEPI_LOG_DIR}/pipeline_${STAMP}.log"
 REPORT_FILE="${SKLEPI_OUTPUT_DIR}/report_${STAMP}.txt"
@@ -41,8 +42,11 @@ sqlite3 "${SKLEPI_DB_PATH}" < "${DB_CONFIG_SQL}"
 echo "[STEP] view current config"
 sqlite3 "${SKLEPI_DB_PATH}" < "${VIEW_CONFIG_SQL}"
 
-echo "[STEP] add new species for this year"
+echo "[STEP] add new species for ${YEAR}"
 sqlite3 "${SKLEPI_DB_PATH}" < "${NEW_YEARLY_SPECIES}"
+
+echo "[STEP] add manual inserted species for ${YEAR}"
+sqlite3 "${SKLEPI_DB_PATH}" < "${MANUAL_INSERTED_SPECIES}"
 
 echo "[STEP] import taxonomy"
 python3 "${SKLEPI_SRC_DIR}/import_dyntaxa_dwca.py"
