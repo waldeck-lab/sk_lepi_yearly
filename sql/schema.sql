@@ -297,6 +297,14 @@ VALUES ('report_year', '2025');
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('report_formatted', 'false');
 
+-- Parameter: Verbose output (format: BOOL)
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('verbose_output', 'false');
+
+-- Parameter: Few observations threshold (0 = disabled)
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('few_observations_threshold', '3');
+
 -- #  v_report_year
 DROP VIEW IF EXISTS v_report_year;
 CREATE VIEW v_report_year AS
@@ -316,23 +324,59 @@ SELECT
 FROM app_config
 WHERE config_key = 'report_formatted';
 
+
 -- # v_config_status
 DROP VIEW IF EXISTS v_config_status;
 
 CREATE VIEW v_config_status AS
 SELECT
-    MAX(CASE WHEN config_key='report_year'
-        THEN config_value END) AS report_year,
+    MAX(CASE
+        WHEN config_key = 'report_year' THEN config_value
+    END) AS report_year,
 
     CASE
-        WHEN LOWER(TRIM(MAX(CASE WHEN config_key='report_formatted'
-            THEN config_value END))) IN ('1','true','yes','on')
+        WHEN LOWER(TRIM(MAX(CASE
+            WHEN config_key = 'report_formatted' THEN config_value
+        END))) IN ('1','true','yes','on')
         THEN 'ON'
         ELSE 'OFF'
-    END AS formatted_output
+    END AS formatted_output,
+
+    CASE
+        WHEN LOWER(TRIM(MAX(CASE
+            WHEN config_key = 'verbose_output' THEN config_value
+        END))) IN ('1','true','yes','on')
+        THEN 'ON'
+        ELSE 'OFF'
+    END AS verbose_output,
+
+    MAX(CASE
+        WHEN config_key = 'few_observations_threshold'
+        THEN config_value
+    END) AS few_obs_threshold
 
 FROM app_config;
 
+-- #  v_verbose_output
+DROP VIEW IF EXISTS v_verbose_output;
+CREATE VIEW v_verbose_output AS
+SELECT
+    CASE
+        WHEN LOWER(TRIM(config_value)) IN ('1', 'true', 'yes', 'on')
+        THEN 1
+        ELSE 0
+    END AS verbose_output
+FROM app_config
+WHERE config_key = 'verbose_output';
+
+
+-- # v_few_obs_threshold
+DROP VIEW IF EXISTS v_few_obs_threshold;
+CREATE VIEW v_few_obs_threshold AS
+SELECT
+    CAST(config_value AS INTEGER) AS few_obs_threshold
+FROM app_config
+WHERE config_key = 'few_observations_threshold';
 
 -- =========================================================
 -- Config table
@@ -690,18 +734,13 @@ SELECT
     'Få observationer under året' AS reason_text,
     40 AS priority
 FROM v_species_summary s
-WHERE s.observation_count <= 3
-
-UNION ALL
-
-SELECT
-    s.taxon_id,
-    s.scientific_name,
-    'verified' AS reason_code,
-    'Minst en verifierad observation' AS reason_text,
-    60 AS priority
-FROM v_species_summary s
-WHERE s.verified_count >= 1
+WHERE
+    (SELECT COALESCE(MAX(few_obs_threshold), 0) FROM v_few_obs_threshold) > 0
+    AND COALESCE(s.red_list_code, '') NOT IN ('CR','EN','VU','NT')
+    AND s.observation_count <= (
+        SELECT COALESCE(MAX(few_obs_threshold), 0)
+        FROM v_few_obs_threshold
+    )
 
 UNION ALL
 
@@ -1130,6 +1169,7 @@ WITH base AS (
         oc.obs_texts,
         ds.first_date,
         ds.last_date,
+        (SELECT COALESCE(MAX(verbose_output), 0) FROM v_verbose_output) AS verbose_output,
 
         CASE
             WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0 THEN 1
@@ -1141,10 +1181,20 @@ WITH base AS (
             ELSE 0
         END AS has_redlist,
 
-        CASE
-            WHEN i.observation_count <= 3 THEN 1
-            ELSE 0
-        END AS has_few_observations
+	CASE
+		WHEN
+	   	    (
+			SELECT few_obs_threshold
+            		FROM v_few_obs_threshold
+           	    ) > 0
+           	    AND i.red_list_code NOT IN ('CR','EN','VU','NT')
+           	    AND i.observation_count <= (
+               	    	SELECT few_obs_threshold
+               		FROM v_few_obs_threshold
+          	    )
+    	  	THEN 1
+    		ELSE 0
+    	END AS has_few_observations
     FROM v_interesting_family_species i
     LEFT JOIN v_obs_concat oc
         ON oc.taxon_id = i.taxon_id
@@ -1195,7 +1245,7 @@ SELECT
                 ELSE ''
             END ||
             CASE
-                WHEN has_first_in_skane = 1 OR has_redlist = 1 THEN
+                WHEN has_first_in_skane = 1 OR (has_redlist = 1 AND verbose_output = 1) THEN
                     '. ' ||
                     TRIM(
                         CASE
@@ -1204,12 +1254,12 @@ SELECT
                             ELSE ''
                         END ||
                         CASE
-                            WHEN has_first_in_skane = 1 AND has_redlist = 1
+                            WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
                             THEN '. '
                             ELSE ''
                         END ||
                         CASE
-                            WHEN has_redlist = 1
+                            WHEN has_redlist = 1 AND verbose_output = 1
                             THEN 'Rödlistad art'
                             ELSE ''
                         END
@@ -1226,22 +1276,27 @@ SELECT
                         ELSE ''
                     END ||
                     CASE
-                        WHEN has_first_in_skane = 1 AND has_redlist = 1
+                        WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
                         THEN '. '
                         ELSE ''
                     END ||
                     CASE
-                        WHEN has_redlist = 1
+                        WHEN has_redlist = 1 AND verbose_output = 1
                         THEN 'Rödlistad art'
                         ELSE ''
                     END ||
                     CASE
-                        WHEN (has_first_in_skane = 1 OR has_redlist = 1) AND has_few_observations = 1
+                        WHEN (
+                            has_first_in_skane = 1
+                            OR (has_redlist = 1 AND verbose_output = 1)
+                        )
+                        AND has_few_observations = 1
+                        AND verbose_output = 1
                         THEN '. '
                         ELSE ''
                     END ||
                     CASE
-                        WHEN has_few_observations = 1
+                        WHEN has_few_observations = 1 AND verbose_output = 1
                         THEN 'Få observationer under året'
                         ELSE ''
                     END
@@ -1260,7 +1315,7 @@ SELECT
                 ELSE ''
             END ||
             CASE
-                WHEN has_first_in_skane = 1 OR has_redlist = 1 THEN
+                WHEN has_first_in_skane = 1 OR (has_redlist = 1 AND verbose_output = 1) THEN
                     CASE
                         WHEN first_date IS NOT NULL AND last_date IS NOT NULL
                         THEN '. '
@@ -1273,12 +1328,12 @@ SELECT
                             ELSE ''
                         END ||
                         CASE
-                            WHEN has_first_in_skane = 1 AND has_redlist = 1
+                            WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
                             THEN '. '
                             ELSE ''
                         END ||
                         CASE
-                            WHEN has_redlist = 1
+                            WHEN has_redlist = 1 AND verbose_output = 1
                             THEN 'Rödlistad art'
                             ELSE ''
                         END
@@ -1295,12 +1350,12 @@ SELECT
                         ELSE ''
                     END ||
                     CASE
-                        WHEN has_first_in_skane = 1 AND has_redlist = 1
+                        WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
                         THEN '. '
                         ELSE ''
                     END ||
                     CASE
-                        WHEN has_redlist = 1
+                        WHEN has_redlist = 1 AND verbose_output = 1
                         THEN 'Rödlistad art'
                         ELSE ''
                     END
@@ -1331,6 +1386,7 @@ GROUP BY
     obs_texts,
     first_date,
     last_date,
+    verbose_output,
     has_first_in_skane,
     has_redlist,
     has_few_observations
@@ -1338,6 +1394,7 @@ ORDER BY
     lep_group_sort,
     taxon_sort_order,
     scientific_name;
+
 
 -- #  v_report_lines
 DROP VIEW IF EXISTS v_report_lines;
