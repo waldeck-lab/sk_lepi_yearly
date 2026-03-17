@@ -1,10 +1,12 @@
--- file: dump_authors.sql
+-- file: sql/dump_authors.sql
 
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
 
 .headers on
 .mode tabs
+
+BEGIN;
 
 WITH author_base AS (
     SELECT DISTINCT
@@ -56,3 +58,5 @@ ORDER BY
     n.author_normalized,
     n.scientific_name,
     n.taxon_id;
+
+COMMIT; 

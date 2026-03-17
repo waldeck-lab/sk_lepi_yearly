@@ -1,4 +1,4 @@
--- file: sql/author_abbreviaton_report.sql
+-- file: sql/dump_manually_injected_taxons.sql
 
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
@@ -6,8 +6,8 @@
 .headers on
 .mode tabs
 
-BEGIN;
+BEGIN; 
 
-SELECT * FROM v_author_abbrev_report;
+SELECT * FROM v_manual_flags_status;
 
 COMMIT;

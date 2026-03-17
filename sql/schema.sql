@@ -1,4 +1,4 @@
--- file: ./sql/schema.sql
+-- file: sql/schema.sql
 
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
@@ -73,8 +73,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
 );
 
 CREATE TABLE IF NOT EXISTS species_manual_flags (
-    taxon_id INTEGER,
-    scientific_name TEXT,
+    taxon_id INTEGER NOT NULL,
     reason_code TEXT NOT NULL,
     reason_text TEXT NOT NULL,
     priority INTEGER DEFAULT 100,
@@ -84,8 +83,7 @@ CREATE TABLE IF NOT EXISTS species_manual_flags (
 
 CREATE TABLE IF NOT EXISTS species_skane_history (
     taxon_id INTEGER PRIMARY KEY,
-    scientific_name TEXT,
-    first_known_year_in_skane INTEGER,
+    first_known_year_in_skane INTEGER NOT NULL,
     first_known_obs_date TEXT,
     note TEXT
 );
@@ -823,14 +821,15 @@ FROM v_species_reason_flags
 UNION ALL
 
 SELECT
-    m.taxon_id,
-    m.scientific_name,
+    s.taxon_id,
+    s.scientific_name,
     m.reason_code,
     m.reason_text,
     m.priority
-FROM species_manual_flags m;
-
-
+FROM species_manual_flags m
+JOIN v_species_summary s
+    ON s.taxon_id = m.taxon_id;
+    
 -- #  v_first_in_skane
 DROP VIEW IF EXISTS v_first_in_skane;
 CREATE VIEW v_first_in_skane AS
@@ -848,7 +847,7 @@ SELECT
     s.last_obs,
     s.municipalities,
     'first_in_skane' AS reason_code,
-    'Första Artportalen notering för Skåne.' AS reason_text,
+    'Första artportalobservation i Skåne infaller under valt rapportår' AS reason_text,
     10 AS priority
 FROM v_species_summary s
 JOIN species_skane_history h
@@ -991,6 +990,55 @@ GROUP BY
     i.reason_codes,
     i.reason_texts,
     i.top_priority;
+
+
+-- =========================================================
+-- QA helpview for manually pinned taxons in yearly report
+-- =========================================================
+
+-- #  v_manual_flags_status
+DROP VIEW IF EXISTS v_manual_flags_status;
+CREATE VIEW v_manual_flags_status AS
+SELECT
+    m.taxon_id,
+    t.scientific_name,
+    m.reason_code,
+    m.reason_text,
+    m.priority,
+    m.note,
+    CASE
+        WHEN s.taxon_id IS NOT NULL THEN 1
+        ELSE 0
+    END AS present_in_report_year
+FROM species_manual_flags m
+LEFT JOIN taxa t
+    ON t.taxon_id = m.taxon_id
+LEFT JOIN v_species_summary s
+    ON s.taxon_id = m.taxon_id;
+
+
+-- =========================================================
+-- QA helpview for new species reported in Skåne
+-- =========================================================
+
+-- #  v_skane_history_status
+DROP VIEW IF EXISTS v_skane_history_status;
+CREATE VIEW v_skane_history_status AS
+SELECT
+    h.taxon_id,
+    t.scientific_name,
+    h.first_known_year_in_skane,
+    h.first_known_obs_date,
+    h.note,
+    CASE
+        WHEN s.taxon_id IS NOT NULL THEN 1
+        ELSE 0
+    END AS present_in_report_year
+FROM species_skane_history h
+LEFT JOIN taxa t
+    ON t.taxon_id = h.taxon_id
+LEFT JOIN v_species_summary s
+    ON s.taxon_id = h.taxon_id;
 
 -- =========================================================
 -- AUTHOR DISPLAY

@@ -1,10 +1,12 @@
--- file: dump_family_names.sql
+-- file: sql/dump_family_names.sql
 
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
 
 .headers on
 .mode tabs
+
+BEGIN;
 
 SELECT
     f.family_name,
@@ -36,3 +38,5 @@ LEFT JOIN family_names_sv fsv
     ON fsv.family_name = f.family_name
 ORDER BY
     f.family_name;
+
+COMMIT; 

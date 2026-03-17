@@ -1,10 +1,12 @@
--- file: non_unique_reports.sql
+-- file: sql/non_unique_reports.sql
 
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
 
 .headers on
 .mode tabs
+
+BEGIN; 
 
 SELECT DISTINCT
     o.scientific_name
@@ -13,3 +15,5 @@ LEFT JOIN v_taxa_lepidoptera t
     ON t.scientific_name = o.scientific_name
 WHERE t.scientific_name IS NULL
 ORDER BY o.scientific_name;
+
+COMMIT; 

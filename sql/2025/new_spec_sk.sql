@@ -1,25 +1,31 @@
--- file: ../sql/new_spec_sk_2025.sql
-
--- file: dump_authors.sql
-
+-- file: sql/2025/new_spec_sk.sql
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 Jonas Waldeck
-
+--
 -- Searched 1900-2024, then compared with 1900-2025
--- add with sqlite3 obsperyear.sqlite < new_spec_sk_2025.sql
+-- Apply with:
+--   sqlite3 ./db/obsperyear.sqlite < ./sql/2025/new_spec_sk.sql
+--
+-- NOTE:
+--  * Only taxon_id is used for report logic
+--  * note is for editor-facing readability / traceability
+--  * taxa only appear in the report if they are present in the current report year
 
--- TODO: Manually updated, to be generated automatically!!
+BEGIN;
 
 INSERT OR IGNORE INTO species_skane_history
-(taxon_id, scientific_name, first_known_year_in_skane)
+(taxon_id, first_known_year_in_skane, note)
 VALUES
-(6010429, 'Agrochola lunosa', 2025),
-(214165, 'Argyresthia ivella', 2025),
-(6332812, 'Caloptilia honoratella', 2025),
-(216027, 'Chloantha hyperici', 2025),
-(100636, 'Chrysoclista lathamella', 2025),
-(214458, 'Coleophora juncicolella', 2025),
-(6011700, 'Diplopseustis perieresalis', 2025),
-(6332811, 'Epiblema turbidana', 2025),
-(216289, 'Euxoa ochrogaster', 2025),
-(214233, 'Lyonetia ledi', 2025);
+(6010429, 2025, 'Agrochola lunosa'),
+(214165, 2025, 'Argyresthia ivella'),
+(6332812, 2025, 'Caloptilia honoratella'),
+(216027, 2025, 'Chloantha hyperici'),
+(100636, 2025, 'Chrysoclista lathamella'),
+(214458, 2025, 'Coleophora juncicolella'),
+(6011700, 2025, 'Diplopseustis perieresalis'),
+(6332811, 2025, 'Epiblema turbidana'),
+(216289, 2025, 'Euxoa ochrogaster'),
+(214233, 2025, 'Lyonetia ledi');
+
+COMMIT;
+
