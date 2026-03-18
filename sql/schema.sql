@@ -374,6 +374,8 @@ CREATE TABLE IF NOT EXISTS app_config (
     config_value TEXT NOT NULL
 );
 
+
+
 -- Parameter: Reporting year (format: 4 digit INT)
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('report_year', '2025');
@@ -390,9 +392,26 @@ VALUES ('verbose_output', 'false');
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('few_observations_threshold', '3');
 
+-- Parameter: Observation count threshold for switching to summary-only output
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('obs_summary_threshold', '15');
+
 -- Parameter: Merge family headers by shared Swedish alias (format: BOOL)
 INSERT OR IGNORE INTO app_config (config_key, config_value)
 VALUES ('merge_family_headers_by_sv_alias', 'true');
+
+-- Parameter: Reason codes that may be rendered as visible closing comments
+-- Comma-separated list, e.g.:
+-- first_in_skane,new_for_sweden,migrant,invasive,range_expansion,editorial_note
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES (
+    'visible_reason_codes',
+    'first_in_skane,first_in_sk_sos_db,new_for_sweden,migrant,invasive,range_expansion,editorial_note'
+);
+
+-- Parameter: Number of detailed observations to print per species (recommended: 2-5)
+INSERT OR IGNORE INTO app_config (config_key, config_value)
+VALUES ('obs_detail_limit', '3');
 
 -- #  v_report_year
 DROP VIEW IF EXISTS v_report_year;
@@ -400,6 +419,14 @@ CREATE VIEW v_report_year AS
 SELECT CAST(config_value AS INTEGER) AS report_year
 FROM app_config
 WHERE config_key = 'report_year';
+
+-- #  v_obs_detail_limit
+DROP VIEW IF EXISTS v_obs_detail_limit;
+CREATE VIEW v_obs_detail_limit AS
+SELECT
+    CAST(config_value AS INTEGER) AS obs_detail_limit
+FROM app_config
+WHERE config_key = 'obs_detail_limit';
 
 -- #  v_report_format
 DROP VIEW IF EXISTS v_report_format;
@@ -434,6 +461,14 @@ SELECT
 FROM app_config
 WHERE config_key = 'few_observations_threshold';
 
+-- #  v_obs_summary_threshold
+DROP VIEW IF EXISTS v_obs_summary_threshold;
+CREATE VIEW v_obs_summary_threshold AS
+SELECT
+    CAST(config_value AS INTEGER) AS obs_summary_threshold
+FROM app_config
+WHERE config_key = 'obs_summary_threshold';
+
 -- #  v_merge_family_headers
 DROP VIEW IF EXISTS v_merge_family_headers;
 CREATE VIEW v_merge_family_headers AS
@@ -446,6 +481,14 @@ SELECT
 FROM app_config
 WHERE config_key = 'merge_family_headers_by_sv_alias';
 
+
+-- #  v_visible_reason_codes
+DROP VIEW IF EXISTS v_visible_reason_codes;
+CREATE VIEW v_visible_reason_codes AS
+SELECT
+    LOWER(TRIM(config_value)) AS visible_reason_codes
+FROM app_config
+WHERE config_key = 'visible_reason_codes';
 
 -- # v_config_status
 DROP VIEW IF EXISTS v_config_status;
@@ -477,21 +520,35 @@ SELECT
         THEN config_value
     END) AS few_obs_threshold,
 
+    MAX(CASE
+	WHEN config_key = 'obs_detail_limit'
+    	THEN config_value
+    END) AS obs_detail_limit,
+
+    MAX(CASE
+	WHEN config_key = 'obs_summary_threshold'
+    	THEN config_value
+    END) AS obs_summary_threshold,
+
     CASE
         WHEN LOWER(TRIM(MAX(CASE
             WHEN config_key = 'merge_family_headers_by_sv_alias' THEN config_value
         END))) IN ('1','true','yes','on')
         THEN 'ON'
         ELSE 'OFF'
-    END AS merge_family_headers
+    END AS merge_family_headers,
+
+    MAX(CASE
+        WHEN config_key = 'visible_reason_codes'
+        THEN config_value
+    END) AS visible_reason_codes
 
 FROM app_config;
-
-
 
 -- =========================================================
 -- Config table
 -- =========================================================
+
 CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -1310,31 +1367,37 @@ FROM v_observation_editorial_dedup e;
 -- #  v_report_observations
 DROP VIEW IF EXISTS v_report_observations;
 CREATE VIEW v_report_observations AS
+WITH cfg AS (
+    SELECT COALESCE(MAX(obs_detail_limit), 3) AS obs_detail_limit
+    FROM v_obs_detail_limit
+)
 SELECT
     taxon_id,
     obs_text,
     observed_at
 FROM v_ranked_observations
-WHERE rn <= 5
+WHERE rn <= (SELECT obs_detail_limit FROM cfg)
 ORDER BY
     taxon_id,
     observed_at;
 
-
 -- #  v_obs_concat
 DROP VIEW IF EXISTS v_obs_concat;
 CREATE VIEW v_obs_concat AS
+WITH cfg AS (
+    SELECT COALESCE(MAX(obs_detail_limit), 3) AS obs_detail_limit
+    FROM v_obs_detail_limit
+)
 SELECT
     taxon_id,
-    GROUP_CONCAT(TRIM(obs_text), '; ') AS obs_texts
+    GROUP_CONCAT(RTRIM(TRIM(obs_text), '. '), '; ') AS obs_texts
 FROM (
     SELECT *
     FROM v_ranked_observations
-    WHERE rn <= 3
+    WHERE rn <= (SELECT obs_detail_limit FROM cfg)
     ORDER BY taxon_id, observed_at
 )
 GROUP BY taxon_id;
-
 
 -- =========================================================
 -- REPORT VIEWS
@@ -1366,32 +1429,28 @@ WITH base AS (
         oc.obs_texts,
         ds.first_date,
         ds.last_date,
+	(SELECT COALESCE(MAX(obs_detail_limit), 3) FROM v_obs_detail_limit) AS obs_detail_limit,
+        (SELECT COALESCE(MAX(obs_summary_threshold), 15) FROM v_obs_summary_threshold) AS obs_summary_threshold,
         (SELECT COALESCE(MAX(verbose_output), 0) FROM v_verbose_output) AS verbose_output,
-
-        CASE
-            WHEN instr(COALESCE(i.reason_codes, ''), 'first_in_skane') > 0 THEN 1
-            ELSE 0
-        END AS has_first_in_skane,
+        (SELECT COALESCE(MAX(visible_reason_codes), '') FROM v_visible_reason_codes) AS visible_reason_codes,
 
         CASE
             WHEN i.red_list_code IN ('CR', 'EN', 'VU', 'NT') THEN 1
             ELSE 0
         END AS has_redlist,
 
-	CASE
-		WHEN
-	   	    (
-			SELECT few_obs_threshold
-            		FROM v_few_obs_threshold
-           	    ) > 0
-           	    AND i.red_list_code NOT IN ('CR','EN','VU','NT')
-           	    AND i.observation_count <= (
-               	    	SELECT few_obs_threshold
-               		FROM v_few_obs_threshold
-          	    )
-    	  	THEN 1
-    		ELSE 0
-    	END AS has_few_observations
+        CASE
+            WHEN
+                (SELECT COALESCE(MAX(few_obs_threshold), 0) FROM v_few_obs_threshold) > 0
+                AND COALESCE(i.red_list_code, '') NOT IN ('CR','EN','VU','NT')
+                AND i.observation_count <= (
+                    SELECT COALESCE(MAX(few_obs_threshold), 0)
+                    FROM v_few_obs_threshold
+                )
+            THEN 1
+            ELSE 0
+        END AS has_few_observations
+
     FROM v_interesting_family_species i
     LEFT JOIN v_obs_concat oc
         ON oc.taxon_id = i.taxon_id
@@ -1401,6 +1460,172 @@ WITH base AS (
         ON ad.taxon_id = i.taxon_id
     LEFT JOIN v_species_date_span ds
         ON ds.taxon_id = i.taxon_id
+),
+reason_flags AS (
+    SELECT
+        b.*,
+
+        CASE
+            WHEN instr(',' || b.visible_reason_codes || ',', ',first_in_skane,') > 0
+                 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',first_in_skane,') > 0
+            THEN 1
+            ELSE 0
+        END AS show_first_in_skane,
+
+        CASE
+            WHEN instr(',' || b.visible_reason_codes || ',', ',new_for_sweden,') > 0
+                 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',new_for_sweden,') > 0
+            THEN 1
+            ELSE 0
+        END AS show_new_for_sweden,
+
+	CASE
+	    WHEN instr(',' || b.visible_reason_codes || ',', ',first_in_sk_sos_db,') > 0
+            	 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',first_in_sk_sos_db,') > 0
+    	    THEN 1
+    	    ELSE 0
+	END AS show_first_in_sk_sos_db,
+
+        CASE
+            WHEN instr(',' || b.visible_reason_codes || ',', ',migrant,') > 0
+                 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',migrant,') > 0
+            THEN 1
+            ELSE 0
+        END AS show_migrant,
+
+        CASE
+            WHEN instr(',' || b.visible_reason_codes || ',', ',invasive,') > 0
+                 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',invasive,') > 0
+            THEN 1
+            ELSE 0
+        END AS show_invasive,
+
+        CASE
+            WHEN instr(',' || b.visible_reason_codes || ',', ',range_expansion,') > 0
+                 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',range_expansion,') > 0
+            THEN 1
+            ELSE 0
+        END AS show_range_expansion,
+
+        CASE
+            WHEN instr(',' || b.visible_reason_codes || ',', ',editorial_note,') > 0
+                 AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',editorial_note,') > 0
+            THEN 1
+            ELSE 0
+        END AS show_editorial_note
+
+    FROM base b
+),
+comments AS (
+    SELECT
+        r.*,
+
+        NULLIF(
+            TRIM(
+                CASE
+                    WHEN r.verbose_output = 1 AND r.show_first_in_skane = 1
+                    THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1
+                         AND r.show_first_in_skane = 1
+                         AND (
+                              r.show_new_for_sweden = 1
+                              OR r.show_migrant = 1
+                              OR r.show_invasive = 1
+                              OR r.show_range_expansion = 1
+                              OR r.show_editorial_note = 1
+                         )
+                    THEN '. '
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1 AND r.show_new_for_sweden = 1
+                    THEN 'Ny art för Sverige'
+                    ELSE ''
+                END ||
+
+		CASE
+   		    WHEN r.verbose_output = 1 AND r.show_first_in_sk_sos_db = 1
+    		    THEN 'Ej rapporterad i Artportalen tidigare'
+    		    ELSE ''
+		END ||
+		
+                CASE
+                    WHEN r.verbose_output = 1
+                         AND r.show_new_for_sweden = 1
+                         AND (
+                              r.show_migrant = 1
+                              OR r.show_invasive = 1
+                              OR r.show_range_expansion = 1
+                              OR r.show_editorial_note = 1
+                         )
+                    THEN '. '
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1 AND r.show_migrant = 1
+                    THEN 'Ej bofast, migrerande'
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1
+                         AND r.show_migrant = 1
+                         AND (
+                              r.show_invasive = 1
+                              OR r.show_range_expansion = 1
+                              OR r.show_editorial_note = 1
+                         )
+                    THEN '. '
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1 AND r.show_invasive = 1
+                    THEN 'Invasiv eller potentiellt invasiv'
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1
+                         AND r.show_invasive = 1
+                         AND (
+                              r.show_range_expansion = 1
+                              OR r.show_editorial_note = 1
+                         )
+                    THEN '. '
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1 AND r.show_range_expansion = 1
+                    THEN 'Möjlig expansion i landskapet'
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1
+                         AND r.show_range_expansion = 1
+                         AND r.show_editorial_note = 1
+                    THEN '. '
+                    ELSE ''
+                END ||
+
+                CASE
+                    WHEN r.verbose_output = 1 AND r.show_editorial_note = 1
+                    THEN 'Särskilt intressant fynd'
+                    ELSE ''
+                END
+            ),
+            ''
+        ) AS visible_reason_comment
+
+    FROM reason_flags r
 )
 SELECT
     lep_group_sort,
@@ -1421,147 +1646,72 @@ SELECT
     top_priority,
 
     CASE
-        WHEN observation_count <= 5 THEN obs_texts
-        ELSE NULL
+	WHEN observation_count >= obs_summary_threshold THEN NULL
+	WHEN observation_count >= 1 THEN RTRIM(obs_texts, '. ')
+    	ELSE NULL
     END AS obs_data,
 
     CASE
-        WHEN observation_count > 5 THEN
-            CAST(observation_count AS TEXT) || ' observationer i ' ||
-            CASE
-                WHEN municipality_count = 1 THEN '1 kommun'
-                ELSE CAST(municipality_count AS TEXT) || ' kommuner'
-            END ||
+      WHEN observation_count >= obs_summary_threshold THEN
+        CAST(observation_count AS TEXT) || ' observationer i ' ||
+        CASE
+            WHEN municipality_count = 1 THEN '1 kommun'
+            ELSE CAST(municipality_count AS TEXT) || ' kommuner'
+        END ||
+        CASE
+            WHEN first_date IS NOT NULL AND last_date IS NOT NULL THEN
+                CASE
+                    WHEN first_date = last_date
+                    THEN ' (' || first_date || ')'
+                    ELSE ' (' || first_date || '–' || last_date || ')'
+                END
+            ELSE ''
+        END ||
+        CASE
+            WHEN visible_reason_comment IS NOT NULL AND visible_reason_comment <> '' THEN
+                '. ' || visible_reason_comment
+            ELSE ''
+        END
+
+      WHEN observation_count > obs_detail_limit THEN
+        TRIM(
             CASE
                 WHEN first_date IS NOT NULL AND last_date IS NOT NULL THEN
                     CASE
-                        WHEN first_date = last_date
-                        THEN ' (' || first_date || ')'
-                        ELSE ' (' || first_date || '–' || last_date || ')'
+                        WHEN (observation_count - obs_detail_limit) = 1 THEN
+                            CASE
+                                WHEN first_date = last_date
+                                THEN 'Ytterligare 1 observation den ' || first_date
+                                ELSE 'Ytterligare 1 observation inom intervallet ' || first_date || '–' || last_date
+                            END
+                        ELSE
+                            CASE
+                                WHEN first_date = last_date
+                                THEN 'Ytterligare ' || CAST(observation_count - obs_detail_limit AS TEXT) || ' observationer den ' || first_date
+                                ELSE 'Ytterligare ' || CAST(observation_count - obs_detail_limit AS TEXT) || ' observationer inom intervallet ' || first_date || '–' || last_date
+                            END
                     END
-                ELSE ''
-            END ||
+                ELSE
+                    CASE
+                        WHEN (observation_count - obs_detail_limit) = 1
+                        THEN 'Ytterligare 1 observation under året'
+                        ELSE 'Ytterligare ' || CAST(observation_count - obs_detail_limit AS TEXT) || ' observationer under året'
+                    END
+            END
+            ||
             CASE
-                WHEN has_first_in_skane = 1 OR (has_redlist = 1 AND verbose_output = 1) THEN
-                    '. ' ||
-                    TRIM(
-                        CASE
-                            WHEN has_first_in_skane = 1
-                            THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
-                            ELSE ''
-                        END ||
-                        CASE
-                            WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
-                            THEN '. '
-                            ELSE ''
-                        END ||
-                        CASE
-                            WHEN has_redlist = 1 AND verbose_output = 1
-                            THEN 'Rödlistad art'
-                            ELSE ''
-                        END
-                    )
+                WHEN visible_reason_comment IS NOT NULL AND visible_reason_comment <> ''
+                THEN '. ' || visible_reason_comment
                 ELSE ''
             END
+        )
 
-        WHEN observation_count <= 3 THEN
-            NULLIF(
-                TRIM(
-                    CASE
-                        WHEN has_first_in_skane = 1
-                        THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
-                        ELSE ''
-                    END ||
-                    CASE
-                        WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
-                        THEN '. '
-                        ELSE ''
-                    END ||
-                    CASE
-                        WHEN has_redlist = 1 AND verbose_output = 1
-                        THEN 'Rödlistad art'
-                        ELSE ''
-                    END ||
-                    CASE
-                        WHEN (
-                            has_first_in_skane = 1
-                            OR (has_redlist = 1 AND verbose_output = 1)
-                        )
-                        AND has_few_observations = 1
-                        AND verbose_output = 1
-                        THEN '. '
-                        ELSE ''
-                    END ||
-                    CASE
-                        WHEN has_few_observations = 1 AND verbose_output = 1
-                        THEN 'Få observationer under året'
-                        ELSE ''
-                    END
-                ),
-                ''
-            )
-
-        WHEN observation_count <= 5 THEN
-            CASE
-                WHEN first_date IS NOT NULL AND last_date IS NOT NULL THEN
-                    CASE
-                        WHEN first_date = last_date
-                        THEN '(' || first_date || ')'
-                        ELSE '(' || first_date || '–' || last_date || ')'
-                    END
-                ELSE ''
-            END ||
-            CASE
-                WHEN has_first_in_skane = 1 OR (has_redlist = 1 AND verbose_output = 1) THEN
-                    CASE
-                        WHEN first_date IS NOT NULL AND last_date IS NOT NULL
-                        THEN '. '
-                        ELSE ''
-                    END ||
-                    TRIM(
-                        CASE
-                            WHEN has_first_in_skane = 1
-                            THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
-                            ELSE ''
-                        END ||
-                        CASE
-                            WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
-                            THEN '. '
-                            ELSE ''
-                        END ||
-                        CASE
-                            WHEN has_redlist = 1 AND verbose_output = 1
-                            THEN 'Rödlistad art'
-                            ELSE ''
-                        END
-                    )
-                ELSE ''
-            END
-
-        ELSE
-            NULLIF(
-                TRIM(
-                    CASE
-                        WHEN has_first_in_skane = 1
-                        THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
-                        ELSE ''
-                    END ||
-                    CASE
-                        WHEN has_first_in_skane = 1 AND has_redlist = 1 AND verbose_output = 1
-                        THEN '. '
-                        ELSE ''
-                    END ||
-                    CASE
-                        WHEN has_redlist = 1 AND verbose_output = 1
-                        THEN 'Rödlistad art'
-                        ELSE ''
-                    END
-                ),
-                ''
-            )
+      ELSE
+        visible_reason_comment
     END AS closing_comment
 
-FROM base
+
+FROM comments
 GROUP BY
     lep_group_sort,
     lep_group_code,
@@ -1584,14 +1734,23 @@ GROUP BY
     first_date,
     last_date,
     verbose_output,
-    has_first_in_skane,
+    obs_detail_limit,
+    obs_summary_threshold,
+    show_first_in_sk_sos_db,
+    visible_reason_codes,
     has_redlist,
-    has_few_observations
+    has_few_observations,
+    show_first_in_skane,
+    show_new_for_sweden,
+    show_migrant,
+    show_invasive,
+    show_range_expansion,
+    show_editorial_note,
+    visible_reason_comment
 ORDER BY
     lep_group_sort,
     taxon_sort_order,
     scientific_name;
-
 
 -- #  v_report_lines
 DROP VIEW IF EXISTS v_report_lines;

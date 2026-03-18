@@ -96,12 +96,10 @@ VALUES
 (215991, 'migrant', 'Ej bofast, migrerande.', 25, 'Amphipyra livida, svart buskfly'),
 
 -- Expanding / invasive / otherwise notable
-(216027, 'range_expansion', 'Möjlig expansion i landskapet', 30, 'Chloantha hyperici'),
 (100328, 'editorial_note', 'Möjlig expansion i landskapet.', 25, 'Apatura iris'),
 (100564, 'editorial_note', 'Särskilt intressant fynd.', 25, 'Catocala pacta'),
 (6010418,'editorial_note', 'Särskilt intressant fynd.', 15, 'Mormo maura, Svartbandat ordensfly'),
 (6331497,'editorial_note', 'Särskilt intressant fynd.', 15, 'Catephia alchymista, vitt ordensfly'),
-(6010429,'editorial_note', 'Särskilt intressant fynd.', 5, 'Agrochola lunosa, månfläckat backfly'),
 
 (6008270, 'invasive', 'Invasiv art att bevaka.', 30, 'Lindguldmal'),
 (6010351, 'invasive', 'Invasiv art att bevaka.', 30, 'Buxbomsmott'),
@@ -110,6 +108,7 @@ VALUES
 (216336, 'editorial_note', 'Införd art.', 25, 'Cadra calidella'),
 (216337, 'editorial_note', 'Införd art.', 25, 'Parapoynx bilinealis Rödbrämat akvariemott'),
 
+-- Move last year's new_species_sk.sql into this list following years
 
 (6010337,'editorial_note', 'Nyetablerad art.', 25, 'Ephestia woodiella'),
 (6329888,'editorial_note', 'Nyetablerad art.', 25, 'Cnephasia pumicana'),
@@ -125,11 +124,21 @@ VALUES
 (6007442,'editorial_note', 'Nyetablerad art.', 25, 'Stigmella minusculella, bronsdvärgmal'),
 (215390, 'editorial_note', 'Nyetablerad art.', 25, 'Eudonia delunella, kvadratugglemott'),
 (6010305,'editorial_note', 'Nyetablerad art.', 25, 'Crocidosema plebejana, kattostfrövecklare'),
-(100372, 'editorial_note', 'Nyetablerad art.', 25, 'Apterona helicoidella, snäcksäckspinnare');
+(100372, 'editorial_note', 'Nyetablerad art.', 25, 'Apterona helicoidella, snäcksäckspinnare'), 
 
--- Exceptional cases
---(214165, 'new_for_sweden', 'Ny art för Sverige', 5, 'Aktiveras endast om relevant');
 
+-- New in Skåne SOS db for any reasons (should be consistant with new_species_sk.sql)
+--(216027, 'first_in_sk_sos_db', 'Första fyndet i den skånska SOS-databasen', 15, 'Kan finnas äldre ej digitaliserade fynd');
+(214165, 'first_in_sk_sos_db', 'Första fyndet i artportalen detta år', 15, 'Argyresthia ivella'),
+(100636, 'first_in_sk_sos_db', 'Första fyndet i artportalen detta år', 15, 'Chrysoclista lathamella'),
+(214458, 'first_in_sk_sos_db', 'Första rapport i artportalen rapport detta år', 15, 'Coleophora juncicolella'),
+
+-- Exceptional cases (should be consistant with new_species_sk.sql)
+(6010380, 'new_for_sweden', 'Ny art för Sverige', 5, 'Stegania trimaculata'),
+(6008327, 'new_for_sweden', 'Ny art för Sverige', 5, 'Phyllonorycter medicaginellus'),
+(6010380, 'new_for_sweden', 'Ny art för Sverige', 5, 'Agrochola lunosa'),
+(6332811, 'new_for_sweden', 'Ny art för Sverige', 5, 'Epiblema turbidana'),
+(6332812, 'new_for_sweden', 'Ny art för Sverige', 5, 'Caloptilia honoratella');
 
 
 COMMIT;

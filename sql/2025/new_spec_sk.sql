@@ -16,16 +16,27 @@ BEGIN;
 INSERT OR IGNORE INTO species_skane_history
 (taxon_id, first_known_year_in_skane, note)
 VALUES
-(6010429, 2025, 'Agrochola lunosa'),
-(214165, 2025, 'Argyresthia ivella'),
-(6332812, 2025, 'Caloptilia honoratella'),
-(216027, 2025, 'Chloantha hyperici'),
-(100636, 2025, 'Chrysoclista lathamella'),
-(214458, 2025, 'Coleophora juncicolella'),
-(6011700, 2025, 'Diplopseustis perieresalis'),
+
+-- New for Sweden (and Skåne and artportalen) 2025
+(6010380, 2025, 'Stegania trimaculata'), 
+(6008327, 2025, 'Phyllonorycter medicaginellus'), 
+(6010380, 2025, 'Agrochola lunosa'), 
 (6332811, 2025, 'Epiblema turbidana'),
+(6332812, 2025, 'Caloptilia honoratella'),
+
+-- New Skåne provincal find 2025 (and first artportalen)
+(216027, 2025, 'Chloantha hyperici'),
+(6011700, 2025, 'Diplopseustis perieresalis'),
 (216289, 2025, 'Euxoa ochrogaster'),
-(214233, 2025, 'Lyonetia ledi');
+(6010215, 2025, 'Tuta absoluta'), 
+(102500, 2025, 'Scrobipalpa salicorniae'),
+(216322, 2025, 'Zelleria oleastrella'), 
+
+-- First artportalen observation 2025 but historic data from Skåne and Sweden exists
+(214165, 2025, 'Argyresthia ivella'),
+(100636, 2025, 'Chrysoclista lathamella'),
+(214458, 2025, 'Coleophora juncicolella');
+
 
 COMMIT;
 
