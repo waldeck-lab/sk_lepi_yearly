@@ -30,12 +30,7 @@ VALUES
 (216289, 2025, 'Euxoa ochrogaster'),
 (6010215, 2025, 'Tuta absoluta'), 
 (102500, 2025, 'Scrobipalpa salicorniae'),
-(216322, 2025, 'Zelleria oleastrella'), 
-
--- First artportalen observation 2025 but historic data from Skåne and Sweden exists
-(214165, 2025, 'Argyresthia ivella'),
-(100636, 2025, 'Chrysoclista lathamella'),
-(214458, 2025, 'Coleophora juncicolella');
+(216322, 2025, 'Zelleria oleastrella');
 
 
 COMMIT;

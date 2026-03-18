@@ -70,6 +70,13 @@ VALUES
 (6010412,'migrant', 'Ej bofast, migrerande.', 30, 'Aedia leucomelas'),
 (215955, 'migrant', 'Ej bofast, migrerande.', 30, 'Chrysodeixis chalcites'),
 
+(6010406,'migrant', 'Ej bofast, migrerande.', 30, 'Cornutiplusia circumflexa, marmormetallfly'),
+(6010408,'migrant', 'Ej bofast, migrerande.', 30, 'Acontia lucida, sydglansfly'),
+(102510,'migrant', 'Ej bofast, migrerande.', 30, 'Trichosea ludifica, gäck'),
+(251247,'migrant', 'Ej bofast, migrerande.', 30, 'Chrysodeixis eriosoma, fikonmetallfly'),
+(6009738,'migrant', 'Ej bofast, migrerande.', 30, 'Chrysodeixis keili, orkidémetallfly'),
+(6010400,'migrant', 'Ej bofast, migrerande.', 30, 'Ctenoplusia limbirena , brunvattrat metallfly'),
+
 (215681, 'migrant', 'Ej bofast, migrerande.', 30, 'Rhodometra sacraria'),
 (201268, 'migrant', 'Ej bofast, migrerande.', 30, 'Utetheisa pulchella'),
 
@@ -91,15 +98,27 @@ VALUES
 (101366, 'migrant', 'Bofast och migrerande.', 30, 'Mythimna turca'),
 (215397, 'migrant', 'Ej bofast, migrerande.', 30, 'Euchromius ocellea, vandrargräsmott'),
 
-
 (215976, 'migrant', 'Ej bofast, migrerande.', 25, 'Cucullia boryphora, stäppkapuchongfly'),
 (215991, 'migrant', 'Ej bofast, migrerande.', 25, 'Amphipyra livida, svart buskfly'),
+
+(6010347, 'migrant', 'Ej bofast, migrerande.', 25, 'Diasemiopsis ramburialis, kåltropikmott'),
+(233645, 'migrant', 'Ej bofast, migrerande.', 25, 'Mythimna languida, brokigt gräsfly'),
+(216197, 'migrant', 'Ej bofast, migrerande.', 25, 'Mythimna unipuncta, vandrargräsfly'),
+(6010439, 'migrant', 'Ej bofast, migrerande.', 25, 'Leucania loreyi, migrantgräsfly'),
+(6010445, 'migrant', 'Ej bofast, migrerande.', 25, 'Euxoa lidia, klittjordfly'),
+(232946, 'migrant', 'Ej bofast, migrerande.', 25, 'Agrotis bigramma, piltecknat jordfly'),
+(6010442, 'migrant', 'Ej bofast, migrerande.', 25, 'Actebia fugax, vattrat stäppfly'),
+(6010452, 'migrant', 'Ej bofast, migrerande.', 25, 'Xestia agathina, tegeljordfly'),
+(101983 , 'migrant', 'Ej bofast, migrerande.', 25, 'Xestia ditrapezium, trapetsjordfly'),
+(234296, 'migrant', 'Ej bofast, migrerande.', 25, 'Drymonia obliterata, bokflikvinge'),
+
 
 -- Expanding / invasive / otherwise notable
 (100328, 'editorial_note', 'Möjlig expansion i landskapet.', 25, 'Apatura iris'),
 (100564, 'editorial_note', 'Särskilt intressant fynd.', 25, 'Catocala pacta'),
 (6010418,'editorial_note', 'Särskilt intressant fynd.', 15, 'Mormo maura, Svartbandat ordensfly'),
 (6331497,'editorial_note', 'Särskilt intressant fynd.', 15, 'Catephia alchymista, vitt ordensfly'),
+(6010438, 'editorial_note', 'Särskilt intressant fynd.', 15, 'Mythimna favicolor, saltängsgräsfly, omstridd art'),
 
 (6008270, 'invasive', 'Invasiv art att bevaka.', 30, 'Lindguldmal'),
 (6010351, 'invasive', 'Invasiv art att bevaka.', 30, 'Buxbomsmott'),
@@ -107,6 +126,7 @@ VALUES
 (216335, 'editorial_note', 'Införd art.', 25, 'Cadra figulilella'),
 (216336, 'editorial_note', 'Införd art.', 25, 'Cadra calidella'),
 (216337, 'editorial_note', 'Införd art.', 25, 'Parapoynx bilinealis Rödbrämat akvariemott'),
+(6010205,'editorial_note', 'Införd art.', 25, 'Gelechia senticetella, sydlig enstäppmal'),
 
 -- Move last year's new_species_sk.sql into this list following years
 
@@ -125,6 +145,11 @@ VALUES
 (215390, 'editorial_note', 'Nyetablerad art.', 25, 'Eudonia delunella, kvadratugglemott'),
 (6010305,'editorial_note', 'Nyetablerad art.', 25, 'Crocidosema plebejana, kattostfrövecklare'),
 (100372, 'editorial_note', 'Nyetablerad art.', 25, 'Apterona helicoidella, snäcksäckspinnare'), 
+(6330903, 'editorial_note', 'Ny egen taxanomisk art', 25, 'Batrachedra confusella, tallsmalvingemal'),
+(6010230, 'editorial_note', 'Nyetablerad art.', 25, 'Coleophora gardesanella, strandmalörtssäckmal'),
+(214665, 'editorial_note', 'Nyetablerad art.', 25, 'Carpatolechia fugacella, bredvingad almkantmal'),
+(6322612, 'editorial_note', 'Nyetablerad art.', 25, 'Xylomoia graminea,sumpugglefly'),
+(6010275, 'editorial_note', 'Nyetablerad art.', 25, 'Hellinsia inulae, luddkrisslefjädermott'),
 
 
 -- New in Skåne SOS db for any reasons (should be consistant with new_species_sk.sql)

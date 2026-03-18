@@ -1486,6 +1486,20 @@ reason_flags AS (
     	    ELSE 0
 	END AS show_first_in_sk_sos_db,
 
+	-- avoid double text on basically the same thing
+	-- CASE
+	-- 	WHEN (
+    	-- 	    	instr(',' || b.visible_reason_codes || ',', ',new_for_sweden,') > 0
+        -- 		AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',new_for_sweden,') > 0
+    	-- 	)
+    	-- 	OR (
+	-- 		instr(',' || b.visible_reason_codes || ',', ',first_in_skane,') > 0
+        -- 		AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',first_in_skane,') > 0
+    	-- 	)
+    	-- 	THEN 1
+    	-- 	ELSE 0
+	-- END AS suppress_first_in_skane_text,
+
         CASE
             WHEN instr(',' || b.visible_reason_codes || ',', ',migrant,') > 0
                  AND instr(',' || COALESCE(b.reason_codes, '') || ',', ',migrant,') > 0
@@ -1522,11 +1536,13 @@ comments AS (
 
         NULLIF(
             TRIM(
-                CASE
-                    WHEN r.verbose_output = 1 AND r.show_first_in_skane = 1
-                    THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
-                    ELSE ''
-                END ||
+	    	-- CASE
+    		--     WHEN r.verbose_output = 1
+         	--     	 AND r.show_first_in_skane = 1
+         	-- 	 AND r.suppress_first_in_skane_text = 0
+    	        --     THEN 'Första kända fyndet i Skåne infaller under valt rapportår'
+    		--     ELSE ''
+		-- END ||
 
                 CASE
                     WHEN r.verbose_output = 1
@@ -1643,6 +1659,9 @@ SELECT
     municipality_count,
     reason_codes,
     reason_texts,
+    show_new_for_sweden,
+    show_first_in_skane,
+    show_first_in_sk_sos_db,
     top_priority,
 
     CASE
@@ -1708,7 +1727,14 @@ SELECT
 
       ELSE
         visible_reason_comment
-    END AS closing_comment
+    END AS closing_comment,
+
+    CASE
+	WHEN show_new_for_sweden = 1 THEN 'Ny för landet'
+    	WHEN show_first_in_skane = 1 THEN 'Provinsfynd'
+    	WHEN show_first_in_sk_sos_db = 1 THEN '1:a obs av arten i Artportalen för Sk'
+    	ELSE NULL
+    END AS highlight_tag
 
 
 FROM comments
@@ -1751,6 +1777,7 @@ ORDER BY
     lep_group_sort,
     taxon_sort_order,
     scientific_name;
+
 
 -- #  v_report_lines
 DROP VIEW IF EXISTS v_report_lines;
@@ -1810,13 +1837,26 @@ SELECT
                 END
             ELSE ''
         END
+        || CASE
+            WHEN d.highlight_tag IS NOT NULL AND d.highlight_tag <> '' THEN
+                CASE
+                    WHEN (SELECT report_formatted FROM fmt) = 1
+                    THEN ' **' || d.highlight_tag || '**'
+                    ELSE ' ' || d.highlight_tag
+                END
+            ELSE ''
+        END
     ) AS report_line
 FROM v_report_draft d;
 
 -- #  v_family_headers
 DROP VIEW IF EXISTS v_family_headers;
 CREATE VIEW v_family_headers AS
-WITH merge_cfg AS (
+WITH fmt AS (
+    SELECT COALESCE(MAX(report_formatted), 0) AS report_formatted
+    FROM v_report_format
+),
+merge_cfg AS (
     SELECT COALESCE(MAX(merge_family_headers), 0) AS merge_family_headers
     FROM v_merge_family_headers
 ),
@@ -1855,7 +1895,7 @@ header_groups AS (
         lep_group_code,
         lep_group_label,
         header_group_key,
-        MAX(COALESCE(family_name_sv, '')) AS family_name_sv,
+        MAX(LOWER(COALESCE(family_name_sv, ''))) AS family_name_sv,
         MIN(family_sort_order) AS header_sort_order
     FROM family_header_map
     GROUP BY
@@ -1863,35 +1903,49 @@ header_groups AS (
         lep_group_code,
         lep_group_label,
         header_group_key
+),
+header_text AS (
+    SELECT
+        hg.lep_group_sort,
+        hg.lep_group_code,
+        hg.lep_group_label,
+        hg.header_group_key,
+        hg.header_sort_order,
+        CASE
+            WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+                 AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
+            THEN
+                (
+                    SELECT GROUP_CONCAT(x.family_name, ', ')
+                    FROM (
+                        SELECT f2.family_name
+                        FROM family_header_map f2
+                        WHERE f2.lep_group_sort = hg.lep_group_sort
+                          AND f2.header_group_key = hg.header_group_key
+                        ORDER BY f2.family_sort_order, f2.family_name
+                    ) x
+                ) || ' – ' || LOWER(hg.family_name_sv)
+            ELSE
+                REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
+        END AS family_header_raw
+    FROM header_groups hg
 )
 SELECT
-    hg.lep_group_sort,
-    hg.lep_group_code,
-    hg.lep_group_label,
-    hg.header_group_key,
-    hg.header_sort_order,
+    ht.lep_group_sort,
+    ht.lep_group_code,
+    ht.lep_group_label,
+    ht.header_group_key,
+    ht.header_sort_order,
     CASE
-        WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
-             AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
-        THEN
-            (
-                SELECT GROUP_CONCAT(x.family_name, ', ')
-                FROM (
-                    SELECT f2.family_name
-                    FROM family_header_map f2
-                    WHERE f2.lep_group_sort = hg.lep_group_sort
-                      AND f2.header_group_key = hg.header_group_key
-                    ORDER BY f2.family_sort_order, f2.family_name
-                ) x
-            ) || ' - ' || hg.family_name_sv
-        ELSE
-            REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
+        WHEN (SELECT report_formatted FROM fmt) = 1
+        THEN '**' || ht.family_header_raw || '**'
+        ELSE ht.family_header_raw
     END AS family_header
-FROM header_groups hg
+FROM header_text ht
 ORDER BY
-    hg.lep_group_sort,
-    hg.header_sort_order,
-    hg.header_group_key;
+    ht.lep_group_sort,
+    ht.header_sort_order,
+    ht.header_group_key;
 
 -- #  v_report_output
 DROP VIEW IF EXISTS v_report_output;
@@ -1935,7 +1989,7 @@ header_groups AS (
         lep_group_code,
         lep_group_label,
         header_group_key,
-        MAX(COALESCE(family_name_sv, '')) AS family_name_sv,
+        MAX(LOWER(COALESCE(family_name_sv, ''))) AS family_name_sv,
         MIN(family_sort_order) AS header_sort_order
     FROM family_header_map
     GROUP BY
@@ -1983,21 +2037,45 @@ family_headers AS (
         10 AS section_sort,
         0 AS line_sort,
         CASE
-            WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
-                 AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
+            WHEN (SELECT COALESCE(MAX(report_formatted), 0) FROM v_report_format) = 1
             THEN
-                (
-                    SELECT GROUP_CONCAT(x.family_name, ', ')
-                    FROM (
-                        SELECT f2.family_name
-                        FROM family_header_map f2
-                        WHERE f2.lep_group_sort = hg.lep_group_sort
-                          AND f2.header_group_key = hg.header_group_key
-                        ORDER BY f2.family_sort_order, f2.family_name
-                    ) x
-                ) || ' - ' || hg.family_name_sv
+                '**' ||
+                CASE
+                    WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+                         AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
+                    THEN
+                        (
+                            SELECT GROUP_CONCAT(x.family_name, ', ')
+                            FROM (
+                                SELECT f2.family_name
+                                FROM family_header_map f2
+                                WHERE f2.lep_group_sort = hg.lep_group_sort
+                                  AND f2.header_group_key = hg.header_group_key
+                                ORDER BY f2.family_sort_order, f2.family_name
+                            ) x
+                        ) || ' – ' || LOWER(hg.family_name_sv)
+                    ELSE
+                        REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
+                END
+                || '**'
             ELSE
-                REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
+                CASE
+                    WHEN (SELECT merge_family_headers FROM merge_cfg) = 1
+                         AND COALESCE(TRIM(hg.family_name_sv), '') <> ''
+                    THEN
+                        (
+                            SELECT GROUP_CONCAT(x.family_name, ', ')
+                            FROM (
+                                SELECT f2.family_name
+                                FROM family_header_map f2
+                                WHERE f2.lep_group_sort = hg.lep_group_sort
+                                  AND f2.header_group_key = hg.header_group_key
+                                ORDER BY f2.family_sort_order, f2.family_name
+                            ) x
+                        ) || ' – ' || LOWER(hg.family_name_sv)
+                    ELSE
+                        REPLACE(hg.header_group_key, '__NO_MERGE__:', '')
+                END
         END AS line
     FROM header_groups hg
 ),
