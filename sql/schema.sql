@@ -1997,7 +1997,11 @@ ORDER BY
 -- #  v_report_output
 DROP VIEW IF EXISTS v_report_output;
 CREATE VIEW v_report_output AS
-WITH merge_cfg AS (
+WITH fmt AS (
+    SELECT COALESCE(MAX(report_formatted), 0) AS report_formatted
+    FROM v_report_format
+),
+merge_cfg AS (
     SELECT COALESCE(MAX(merge_family_headers), 0) AS merge_family_headers
     FROM v_merge_family_headers
 ),
@@ -2061,7 +2065,11 @@ chapter_headers AS (
         -20 AS header_sort_order,
         0 AS section_sort,
         0 AS line_sort,
-        lep_group_label AS line
+        CASE
+            WHEN (SELECT report_formatted FROM fmt) = 1
+            THEN '**' || lep_group_label || '**'
+            ELSE lep_group_label
+        END AS line
     FROM chapters
 ),
 chapter_spacer AS (

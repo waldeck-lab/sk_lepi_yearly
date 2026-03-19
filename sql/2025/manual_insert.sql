@@ -56,7 +56,7 @@ VALUES
 (215997, 'migrant', 'Ej bofast, migrerande.', 30, 'Protoschinia scutosa'),
 (215999, 'migrant', 'Ej bofast, migrerande.', 30, 'Heliothis adaucta'),
 (216000, 'migrant', 'Ej bofast, migrerande.', 30, 'Heliothis peltigera'),
-(216001, 'migrant', 'Ej bofast, migrerande.', 30, 'Helicoverpa armigera'),
+(216001, 'migrant', 'Ej bofast, migrerande.', 30, 'Helicovex1rpa armigera'),
 (6324439,'migrant', 'Ej bofast, migrerande.', 30, 'Heliothis nubigera'),
 (6002710,'migrant', 'Ej bofast, migrerande.', 30, 'Heliothis maritima'),
 (101057, 'migrant', 'Ej bofast, migrerande.', 30, 'Heliothis viriplaca'),
@@ -66,6 +66,7 @@ VALUES
 (216013, 'migrant', 'Ej bofast, migrerande.', 30, 'Spodoptera exigua'),
 (216014, 'migrant', 'Ej bofast, migrerande.', 30, 'Spodoptera littoralis'),
 (216291, 'migrant', 'Ej bofast, migrerande.', 30, 'Agrotis ipsilon'),
+(216289, 'migrant', 'Ej bofast, migrerande.', 30, 'Euxoa ochrogaster'),
 
 (6010412,'migrant', 'Ej bofast, migrerande.', 30, 'Aedia leucomelas'),
 (215955, 'migrant', 'Ej bofast, migrerande.', 30, 'Chrysodeixis chalcites'),
@@ -161,7 +162,7 @@ VALUES
 -- Exceptional cases (should be consistant with new_species_sk.sql)
 (6010380, 'new_for_sweden', 'Ny art för Sverige', 5, 'Stegania trimaculata'),
 (6008327, 'new_for_sweden', 'Ny art för Sverige', 5, 'Phyllonorycter medicaginellus'),
-(6010380, 'new_for_sweden', 'Ny art för Sverige', 5, 'Agrochola lunosa'),
+(6010429, 'new_for_sweden', 'Ny art för Sverige', 5, 'Agrochola lunosa'),
 (6332811, 'new_for_sweden', 'Ny art för Sverige', 5, 'Epiblema turbidana'),
 (6332812, 'new_for_sweden', 'Ny art för Sverige', 5, 'Caloptilia honoratella');
 

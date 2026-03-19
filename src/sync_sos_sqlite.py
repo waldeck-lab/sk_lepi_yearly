@@ -339,7 +339,7 @@ def build_payload(start_date: str, end_date: str, taxon_root: int) -> dict:
         "date": {
             "startDate": start_date,
             "endDate": end_date,
-            "dateFilterType": "BetweenStartDateAndEndDate"
+            "dateFilterType": "OverlappingStartDateAndEndDate"
         },
         "dataProvider": {
             "ids": [DATA_PROVIDER_ID]

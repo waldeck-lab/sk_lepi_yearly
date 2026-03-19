@@ -30,8 +30,8 @@ VALUES
 (216289, 2025, 'Euxoa ochrogaster'),
 (6010215, 2025, 'Tuta absoluta'), 
 (102500, 2025, 'Scrobipalpa salicorniae'),
-(216322, 2025, 'Zelleria oleastrella');
-
+(216322, 2025, 'Zelleria oleastrella'),
+(6010429, 2025,'Agrochola lunosa');
 
 COMMIT;
 
