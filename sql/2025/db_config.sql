@@ -45,7 +45,7 @@ SET config_value = '3'
 WHERE config_key = 'obs_detail_limit';
 
 UPDATE app_config
-SET config_value = '15'
+SET config_value = '16'
 WHERE config_key = 'obs_summary_threshold';
 
 SELECT printf(

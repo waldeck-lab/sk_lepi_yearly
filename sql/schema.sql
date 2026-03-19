@@ -210,7 +210,7 @@ INSERT OR IGNORE INTO family_names_sv (family_name, family_name_sv) VALUES
 ('Depressariidae', 'Plattmalar'),
 ('Douglasiidae', 'Skäckmalar'),
 ('Epermeniidae', 'Skärmmalar'),
-('Erebidae', 'Björkspinnare & lappmätare'),
+('Erebidae', 'Björnspinnare, oäkta spinnare & näbbflyn'),
 ('Eriocraniidae', 'Purpurmalar'),
 ('Geometridae', 'Mätare'),
 ('Glyphipterigidae', 'Hakmalar'),
@@ -606,8 +606,8 @@ SELECT
         ELSE 'other'
     END AS lep_group_code,
     CASE
-        WHEN is_macro = 1 THEN 'Macro Lepidoptera - Storfjärilar'
-        WHEN is_micro = 1 THEN 'Micro Lepidoptera - Småfjärilar'
+        WHEN is_macro = 1 THEN 'Macro Lepidoptera - storfjärilar'
+        WHEN is_micro = 1 THEN 'Micro Lepidoptera - småfjärilar'
         ELSE 'Övrigt'
     END AS lep_group_label
 FROM grouped;
@@ -1142,6 +1142,22 @@ FROM author_clean c
 LEFT JOIN author_abbrev a
     ON a.author_full = c.author_normalized;
 
+-- special view for authors used
+DROP VIEW IF EXISTS v_author_abbrev_report_used;
+CREATE VIEW v_author_abbrev_report_used AS
+SELECT
+    a.author_short AS förkortning,
+    REPLACE(GROUP_CONCAT(DISTINCT a.author_full), ',', ' / ') AS auktor
+FROM author_abbrev a
+JOIN (
+    SELECT DISTINCT author_short
+    FROM v_report_lines
+    WHERE author_short IS NOT NULL AND author_short <> ''
+) used
+ON used.author_short = a.author_short
+GROUP BY a.author_short
+ORDER BY a.author_short;
+
 -- =========================================================
 -- EDITORIAL OBSERVATION TEXT
 -- =========================================================
@@ -1346,23 +1362,54 @@ WHERE dup_rn = 1;
 -- #  v_ranked_observations
 DROP VIEW IF EXISTS v_ranked_observations;
 CREATE VIEW v_ranked_observations AS
+WITH base AS (
+    SELECT
+        e.*,
+        MIN(e.observed_at) OVER (
+            PARTITION BY e.taxon_id
+        ) AS first_observed_at_for_taxon
+    FROM v_observation_editorial_dedup e
+),
+rank_prep AS (
+    SELECT
+        b.*,
+        (
+            CASE WHEN b.source_comment IS NOT NULL AND TRIM(b.source_comment) <> '' THEN 100 ELSE 0 END +
+            CASE WHEN b.verified = 1 THEN 40 ELSE 0 END +
+            CASE WHEN b.individual_count IS NOT NULL AND TRIM(b.individual_count) <> '' THEN 20 ELSE 0 END
+        ) AS quality_score,
+        CASE
+            WHEN b.observed_at = b.first_observed_at_for_taxon THEN 1
+            ELSE 0
+        END AS is_first_observation
+    FROM base b
+)
 SELECT
-    e.*,
-    (
-        CASE WHEN e.source_comment IS NOT NULL AND TRIM(e.source_comment) <> '' THEN 100 ELSE 0 END +
-        CASE WHEN e.verified = 1 THEN 40 ELSE 0 END +
-        CASE WHEN e.individual_count IS NOT NULL AND TRIM(e.individual_count) <> '' THEN 20 ELSE 0 END
-    ) AS quality_score,
+    r.*,
     ROW_NUMBER() OVER (
-        PARTITION BY e.taxon_id
+        PARTITION BY r.taxon_id
         ORDER BY
-            CASE WHEN e.source_comment IS NOT NULL AND TRIM(e.source_comment) <> '' THEN 1 ELSE 0 END DESC,
-            CASE WHEN e.verified = 1 THEN 1 ELSE 0 END DESC,
-            CASE WHEN e.individual_count IS NOT NULL AND TRIM(e.individual_count) <> '' THEN 1 ELSE 0 END DESC,
-            e.observed_at ASC,
-            e.obs_id
+            r.is_first_observation DESC,
+            CASE
+                WHEN r.is_first_observation = 1 THEN r.obs_id
+                ELSE NULL
+            END,
+            CASE
+                WHEN r.is_first_observation = 0 AND r.source_comment IS NOT NULL AND TRIM(r.source_comment) <> '' THEN 1
+                ELSE 0
+            END DESC,
+            CASE
+                WHEN r.is_first_observation = 0 AND r.verified = 1 THEN 1
+                ELSE 0
+            END DESC,
+            CASE
+                WHEN r.is_first_observation = 0 AND r.individual_count IS NOT NULL AND TRIM(r.individual_count) <> '' THEN 1
+                ELSE 0
+            END DESC,
+            r.observed_at ASC,
+            r.obs_id
     ) AS rn
-FROM v_observation_editorial_dedup e;
+FROM rank_prep r;
 
 -- #  v_report_observations
 DROP VIEW IF EXISTS v_report_observations;
@@ -1732,7 +1779,7 @@ SELECT
     CASE
 	WHEN show_new_for_sweden = 1 THEN 'Ny för landet'
     	WHEN show_first_in_skane = 1 THEN 'Provinsfynd'
-    	WHEN show_first_in_sk_sos_db = 1 THEN '1:a obs av arten i Artportalen för Sk'
+    	WHEN show_first_in_sk_sos_db = 1 THEN 'Första notering i Artportalen för Sk'
     	ELSE NULL
     END AS highlight_tag
 
@@ -2098,7 +2145,7 @@ species_lines AS (
         hg.header_sort_order,
         12 AS section_sort,
         rl.taxon_sort_order AS line_sort,
-        rl.report_line AS line
+	' ' || rl.report_line AS line
     FROM v_report_lines rl
     JOIN family_header_map fm
         ON fm.lep_group_sort = rl.lep_group_sort
